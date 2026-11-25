@@ -21,7 +21,7 @@ internal sealed record BatteryReading(string Label, int? Percent = null, Battery
 }
 
 internal sealed record DeviceSample(string Id, string Name, DeviceKind Kind, string Transport,
-    IReadOnlyList<BatteryReading> Readings)
+    IReadOnlyList<BatteryReading> Readings, bool Wireless = false)
 {
     public string Charge => FormatCharge(Readings);
 

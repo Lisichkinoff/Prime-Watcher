@@ -121,7 +121,7 @@ internal sealed class WindowsDevices(Action requestRefresh) : IDisposable
             }
             string name = nodes.Select(node => node.Info.Name).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
                 ?? KindName(kind.Value);
-            return (new DeviceSample(group.Key, name, kind.Value, "Bluetooth", readings), xinputAlias);
+            return (new DeviceSample(group.Key, name, kind.Value, "Bluetooth", readings, Wireless: true), xinputAlias);
         }).ToArray();
 
         var bluetoothResults = (await Task.WhenAll(bluetoothTasks)).OfType<ValueTuple<DeviceSample, bool>>().ToArray();
@@ -153,7 +153,9 @@ internal sealed class WindowsDevices(Action requestRefresh) : IDisposable
                 continue;
 
             var readings = PercentReading(group.Select(item => item.Percent).Append(ReadPercent(container)));
-            var sample = new DeviceSample(group.Key, name, chosen.Kind, "HID / Windows", readings);
+            bool wireless = chosen.Instance.Contains("BTH", StringComparison.OrdinalIgnoreCase)
+                || readings.Count > 0 || LooksWireless(name);
+            var sample = new DeviceSample(group.Key, name, chosen.Kind, "HID / Windows", readings, wireless);
             if (chosen.IsXInput && xinput.Length > 0)
                 matchedControllers.Add(sample);
             else
@@ -193,6 +195,11 @@ internal sealed class WindowsDevices(Action requestRefresh) : IDisposable
 
     private static bool LooksLikeHeadset(string name) =>
         new[] { "headset", "headphone", "наушник", "гарнитур" }
+            .Any(word => name.Contains(word, StringComparison.OrdinalIgnoreCase));
+
+    private static bool LooksWireless(string name) =>
+        name.Equals("CIDOO QK75", StringComparison.OrdinalIgnoreCase)
+        || new[] { "wireless", "bluetooth", "2.4g", "2,4 г", "беспровод" }
             .Any(word => name.Contains(word, StringComparison.OrdinalIgnoreCase));
 
     private static async Task<DeviceInformation?> GetContainerAsync(Guid id, CancellationToken cancellation)

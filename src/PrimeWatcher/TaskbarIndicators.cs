@@ -57,20 +57,21 @@ internal sealed class TaskbarIndicators : Window
     public void Render(IReadOnlyList<DeviceState> devices, string? pinned, bool show)
     {
         enabled = show;
-        indicators = devices
+        indicators = devices.Where(device => device.Connected
+                && (device.Device.Kind == DeviceKind.Gamepad || device.Device.Wireless || device.Device.Readings.Count > 0))
             .Select(device =>
             {
                 var appearance = TrayIcon.Appearance(device);
                 bool selected = string.Equals(device.Device.Id, pinned, StringComparison.OrdinalIgnoreCase);
-                string? value = appearance.Percent is int percent ? $"{percent}%"
-                    : appearance.Level is BatteryLevel level ? LevelSymbol(level)
-                    : selected ? "–" : null;
-                return value is null ? null : new Indicator(device.Device.Kind, value,
-                    $"{device.Device.Name} · {device.Charge} · {device.Detail}", device.Connected, selected);
+                bool hasReading = appearance.Percent.HasValue || appearance.Level.HasValue;
+                string value = appearance.Percent is int percent ? $"{percent}%"
+                    : appearance.Level is BatteryLevel level ? LevelSymbol(level) : "—";
+                return new Indicator(device.Device.Kind, value,
+                    $"{device.Device.Name} · {device.Charge} · {device.Detail}", hasReading, selected);
             })
-            .OfType<Indicator>()
-            .OrderByDescending(item => item.Selected)
-            .Take(4)
+            .GroupBy(item => item.Kind)
+            .Select(group => group.OrderByDescending(item => item.Selected)
+                .ThenByDescending(item => item.HasReading).First())
             .ToArray();
 
         if (!enabled || indicators.Length == 0)
@@ -135,7 +136,8 @@ internal sealed class TaskbarIndicators : Window
     {
         int perItem = (int)Math.Ceiling(ItemWidth * layout.Scale);
         int capacity = Math.Max(0, (layout.Right - layout.Left) / perItem);
-        Indicator[] visible = indicators.Take(capacity).ToArray();
+        Indicator[] visible = indicators.OrderByDescending(item => item.Selected).ThenBy(item => item.Kind)
+            .Take(capacity).OrderBy(item => item.Kind).ToArray();
         if (visible.Length == 0)
         {
             Hide();
@@ -181,7 +183,6 @@ internal sealed class TaskbarIndicators : Window
             Orientation = Orientation.Horizontal,
             VerticalAlignment = VerticalAlignment.Center,
             Background = Brushes.Transparent,
-            Opacity = indicator.Connected ? 1 : 0.6,
             ToolTip = indicator.Description
         };
         AutomationProperties.SetName(item, indicator.Description);
@@ -227,7 +228,7 @@ internal sealed class TaskbarIndicators : Window
         base.OnClosed(args);
     }
 
-    private sealed record Indicator(DeviceKind Kind, string Value, string Description, bool Connected, bool Selected);
+    private sealed record Indicator(DeviceKind Kind, string Value, string Description, bool HasReading, bool Selected);
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
     private static extern int GetWindowLong(IntPtr window, int index);

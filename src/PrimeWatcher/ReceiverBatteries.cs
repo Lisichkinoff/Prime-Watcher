@@ -83,7 +83,7 @@ internal static class ReceiverBatteries
         if (response is null)
             return null;
         return response[6] <= 100
-            ? [new($"windows:{id}:Headset", "HyperX Cloud III S Wireless", DeviceKind.Headset, "USB 2,4 ГГц", [new("", response[6])])]
+            ? [new($"windows:{id}:Headset", "HyperX Cloud III S Wireless", DeviceKind.Headset, "USB 2,4 ГГц", [new("", response[6])], Wireless: true)]
             : [];
     }
 
@@ -99,7 +99,7 @@ internal static class ReceiverBatteries
             && report[0] == 8 && report[1] == 4 && report[2] == 0 && report[6] <= 100
             && (report.Sum(value => value) & 0xFF) == 0x55, TimeSpan.FromMilliseconds(750), cancellation);
         return response is null ? null
-            : [new($"windows:{id}:Mouse", "VGN 2.4G Mouse", DeviceKind.Mouse, "USB 2,4 ГГц", [new("", response[6])])];
+            : [new($"windows:{id}:Mouse", "VGN 2.4G Mouse", DeviceKind.Mouse, "USB 2,4 ГГц", [new("", response[6])], Wireless: true)];
     }
 
     private static async Task<DeviceSample[]?> ReadLogitechAsync(string path, string id, CancellationToken cancellation)
@@ -179,7 +179,7 @@ internal static class ReceiverBatteries
                 reading = new("", battery[0]);
 
             devices.Add(new DeviceSample($"receiver:{id}:{slot}:{name}", name, kind.Value, "Logitech USB 2,4 ГГц",
-                reading is null ? [] : [reading]));
+                reading is null ? [] : [reading], Wireless: true));
         }
         return devices.Count == 0 ? null : devices.ToArray();
     }
