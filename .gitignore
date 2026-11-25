@@ -1,0 +1,6 @@
+.build-cache/
+artifacts/
+[Bb]in/
+[Oo]bj/
+.vs/
+*.user
