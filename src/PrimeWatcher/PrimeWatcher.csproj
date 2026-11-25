@@ -10,9 +10,11 @@
     <StartupObject>PrimeWatcher.Program</StartupObject>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>PrimeWatcher</AssemblyName>
-    <Version>1.0.2</Version>
+    <ApplicationIcon>PrimeWatcher.ico</ApplicationIcon>
+    <Version>1.0.4</Version>
   </PropertyGroup>
   <ItemGroup>
+    <Resource Include="PrimeWatcher.ico" />
     <PackageReference Include="Velopack" Version="1.2.161" />
   </ItemGroup>
 </Project>

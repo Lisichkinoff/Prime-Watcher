@@ -16,8 +16,13 @@ namespace PrimeWatcher;
 
 internal sealed class TaskbarIndicators : Window
 {
-    private const double ItemWidth = 66;
+    private const double ValueItemWidth = 66;
+    private const double IconItemWidth = 30;
     private const double RowHeight = 30;
+    private const int NoSize = 0x0001;
+    private const int NoMove = 0x0002;
+    private const int NoActivate = 0x0010;
+    private static readonly IntPtr TopmostWindow = new(-1);
     private static readonly IReadOnlyDictionary<DeviceKind, Geometry> Glyphs = new Dictionary<DeviceKind, Geometry>
     {
         [DeviceKind.Headset] = Geometry.Parse("M2,10 V8 A6,6 0 0 1 14,8 V10 M2,9 H5 V15 H3 A1,1 0 0 1 2,14 Z M14,9 H11 V15 H13 A1,1 0 0 0 14,14 Z"),
@@ -27,7 +32,7 @@ internal sealed class TaskbarIndicators : Window
     };
 
     private readonly StackPanel row = new() { Orientation = Orientation.Horizontal };
-    private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(1.25) };
+    private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private Indicator[] indicators = [];
     private Indicator[] shown = [];
     private TaskbarLayout? placed;
@@ -35,6 +40,8 @@ internal sealed class TaskbarIndicators : Window
     private bool enabled;
     private bool closed;
     private bool highContrast;
+    private double itemWidth = ValueItemWidth;
+    private int unavailableReads;
 
     public TaskbarIndicators(Action openPanel)
     {
@@ -54,31 +61,25 @@ internal sealed class TaskbarIndicators : Window
         timer.Tick += (_, _) => _ = RefreshAsync();
     }
 
-    public void Render(IReadOnlyList<DeviceState> devices, string? pinned, bool show)
+    public void Render(IReadOnlyList<DeviceState> devices, AppSettings settings)
     {
-        enabled = show;
-        indicators = devices.Where(device => device.Connected
-                && (device.Device.Kind == DeviceKind.Gamepad || device.Device.Wireless || device.Device.Readings.Count > 0))
+        enabled = settings.ShowTaskbarIndicators;
+        itemWidth = settings.TaskbarShowValues ? ValueItemWidth : IconItemWidth;
+        indicators = settings.GetTaskbarDevices(devices)
             .Select(device =>
             {
                 var appearance = TrayIcon.Appearance(device);
-                bool selected = string.Equals(device.Device.Id, pinned, StringComparison.OrdinalIgnoreCase);
-                bool hasReading = appearance.Percent.HasValue || appearance.Level.HasValue;
-                string value = appearance.Percent is int percent ? $"{percent}%"
+                bool selected = string.Equals(device.Device.Id, settings.PinnedDevice, StringComparison.OrdinalIgnoreCase);
+                string? value = !settings.TaskbarShowValues ? null : appearance.Percent is int percent ? $"{percent}%"
                     : appearance.Level is BatteryLevel level ? LevelSymbol(level) : "—";
                 return new Indicator(device.Device.Kind, value,
-                    $"{device.Device.Name} · {device.Charge} · {device.Detail}", hasReading, selected);
-            })
-            .GroupBy(item => item.Kind)
-            .Select(group => group.OrderByDescending(item => item.Selected)
-                .ThenByDescending(item => item.HasReading).First())
-            .ToArray();
+                    $"{device.Device.Name} · {device.Charge} · {device.Detail}", selected, device.IsLastReading);
+            }).ToArray();
 
         if (!enabled || indicators.Length == 0)
         {
             timer.Stop();
-            Hide();
-            placed = null;
+            ClearPlacement();
             return;
         }
 
@@ -91,7 +92,7 @@ internal sealed class TaskbarIndicators : Window
         }
     }
 
-    private static string LevelSymbol(BatteryLevel level) => level switch
+    internal static string LevelSymbol(BatteryLevel level) => level switch
     {
         BatteryLevel.Empty => "▱",
         BatteryLevel.Low => "▰▱▱",
@@ -106,25 +107,13 @@ internal sealed class TaskbarIndicators : Window
         checking = true;
         try
         {
-            TaskbarLayout? layout = await Task.Run(TaskbarLayout.Read);
-            if (closed)
-                return;
-            if (enabled && indicators.Length > 0 && layout is not null)
-                Place(layout);
-            else
-            {
-                Hide();
-                placed = null;
-            }
+            var result = await Task.Run(TaskbarLayout.Read);
+            ApplyLayout(result.Layout, result.Unavailable);
         }
         catch (Exception ex)
         {
             Trace.WriteLine(ex);
-            if (!closed)
-            {
-                Hide();
-                placed = null;
-            }
+            ApplyLayout(null, unavailable: true);
         }
         finally
         {
@@ -132,20 +121,42 @@ internal sealed class TaskbarIndicators : Window
         }
     }
 
-    private void Place(TaskbarLayout layout)
+    private void ApplyLayout(TaskbarLayout? layout, bool unavailable)
     {
-        int perItem = (int)Math.Ceiling(ItemWidth * layout.Scale);
+        if (closed || !enabled || indicators.Length == 0)
+            return;
+        if (layout is not null)
+        {
+            unavailableReads = 0;
+            Place(layout, restoreTopmost: true);
+        }
+        else if (!unavailable || ++unavailableReads >= 3)
+        {
+            ClearPlacement();
+        }
+    }
+
+    private void ClearPlacement()
+    {
+        Hide();
+        placed = null;
+        unavailableReads = 0;
+    }
+
+    private void Place(TaskbarLayout layout, bool restoreTopmost = false)
+    {
+        int perItem = (int)Math.Ceiling(itemWidth * layout.Scale);
         int capacity = Math.Max(0, (layout.Right - layout.Left) / perItem);
         Indicator[] visible = indicators.OrderByDescending(item => item.Selected).ThenBy(item => item.Kind)
+            .ThenBy(item => item.LastReading)
             .Take(capacity).OrderBy(item => item.Kind).ToArray();
         if (visible.Length == 0)
         {
-            Hide();
-            placed = null;
+            ClearPlacement();
             return;
         }
 
-        bool widthChanged = shown.Length != visible.Length;
+        bool widthChanged = shown.Length != visible.Length || (shown[0].Value is null) != (visible[0].Value is null);
         bool contrastChanged = highContrast != SystemParameters.HighContrast;
         highContrast = SystemParameters.HighContrast;
         if (placed?.Light != layout.Light || contrastChanged || !shown.SequenceEqual(visible))
@@ -153,7 +164,7 @@ internal sealed class TaskbarIndicators : Window
             var foreground = highContrast ? SystemColors.WindowTextBrush : layout.Light ? Brushes.Black : Brushes.White;
             row.Children.Clear();
             foreach (var indicator in visible)
-                row.Children.Add(CreateItem(indicator, foreground));
+                row.Children.Add(CreateItem(indicator, foreground, itemWidth));
             shown = visible;
         }
 
@@ -166,19 +177,23 @@ internal sealed class TaskbarIndicators : Window
             int y = layout.Top + (layout.Height - height) / 2;
             if (!IsVisible)
             {
-                SetWindowPos(handle, new IntPtr(-1), x, y, width, height, 0x0010);
+                SetWindowPos(handle, TopmostWindow, x, y, width, height, NoActivate);
                 Show();
             }
-            SetWindowPos(handle, new IntPtr(-1), x, y, width, height, 0x0010);
+            SetWindowPos(handle, TopmostWindow, x, y, width, height, NoActivate);
+        }
+        else if (restoreTopmost)
+        {
+            SetWindowPos(new WindowInteropHelper(this).Handle, TopmostWindow, 0, 0, 0, 0, NoActivate | NoSize | NoMove);
         }
         placed = layout;
     }
 
-    private static FrameworkElement CreateItem(Indicator indicator, Brush foreground)
+    private static FrameworkElement CreateItem(Indicator indicator, Brush foreground, double width)
     {
         var item = new StackPanel
         {
-            Width = ItemWidth,
+            Width = width,
             Height = RowHeight,
             Orientation = Orientation.Horizontal,
             VerticalAlignment = VerticalAlignment.Center,
@@ -188,10 +203,10 @@ internal sealed class TaskbarIndicators : Window
         AutomationProperties.SetName(item, indicator.Description);
         item.Children.Add(new Path
         {
-            Data = Glyphs[indicator.Kind],
+            Data = DeviceGlyph(indicator.Kind),
             Width = 16,
             Height = 16,
-            Margin = new Thickness(4, 0, 5, 0),
+            Margin = indicator.Value is null ? new Thickness(7, 0, 7, 0) : new Thickness(4, 0, 5, 0),
             VerticalAlignment = VerticalAlignment.Center,
             Stretch = Stretch.Uniform,
             Stroke = foreground,
@@ -200,17 +215,23 @@ internal sealed class TaskbarIndicators : Window
             StrokeStartLineCap = PenLineCap.Round,
             StrokeEndLineCap = PenLineCap.Round
         });
-        item.Children.Add(new TextBlock
+        if (indicator.Value is not null)
         {
-            Text = indicator.Value,
-            Foreground = foreground,
-            FontSize = 13,
-            FontFamily = new FontFamily("Segoe UI"),
-            FontWeight = FontWeights.SemiBold,
-            VerticalAlignment = VerticalAlignment.Center
-        });
+            item.Children.Add(new TextBlock
+            {
+                Text = indicator.Value,
+                Foreground = foreground,
+                FontSize = 13,
+                FontFamily = new FontFamily("Segoe UI"),
+                FontWeight = FontWeights.SemiBold,
+                VerticalAlignment = VerticalAlignment.Center,
+                Opacity = indicator.LastReading ? 0.72 : 1
+            });
+        }
         return item;
     }
+
+    internal static Geometry DeviceGlyph(DeviceKind kind) => Glyphs[kind];
 
     protected override void OnSourceInitialized(EventArgs args)
     {
@@ -228,7 +249,7 @@ internal sealed class TaskbarIndicators : Window
         base.OnClosed(args);
     }
 
-    private sealed record Indicator(DeviceKind Kind, string Value, string Description, bool HasReading, bool Selected);
+    private sealed record Indicator(DeviceKind Kind, string? Value, string Description, bool Selected, bool LastReading);
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
     private static extern int GetWindowLong(IntPtr window, int index);

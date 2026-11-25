@@ -25,6 +25,7 @@ internal static class ReceiverBatteries
     [
         new(0x01C0, 1, 0x03F0, [0x02CC, 0x06BE], ReadHyperXAsync),
         new(0xFF02, 2, 0x3554, [0xF503], ReadVgnAsync),
+        new(0xFF60, 0x61, 0x36B0, [0x3002], ReadViaKeyboardAsync),
         new(0xFF00, 1, 0x046D, [0xC52B, 0xC532, 0xC534, 0xC548], ReadLogitechAsync),
         new(0xFF00, 2, 0x046D, [0xC52B, 0xC532, 0xC534, 0xC548], ReadLogitechAsync)
     ];
@@ -100,6 +101,21 @@ internal static class ReceiverBatteries
             && (report.Sum(value => value) & 0xFF) == 0x55, TimeSpan.FromMilliseconds(750), cancellation);
         return response is null ? null
             : [new($"windows:{id}:Mouse", "VGN 2.4G Mouse", DeviceKind.Mouse, "USB 2,4 ГГц", [new("", response[6])], Wireless: true)];
+    }
+
+    private static async Task<DeviceSample[]?> ReadViaKeyboardAsync(string path, string id, CancellationToken cancellation)
+    {
+        using var channel = HidChannel.Open(path, 33);
+        if (channel is null)
+            return null;
+        // VIA custom get, channel 0, value 7. Windows adds a zero report ID.
+        byte[]? response = await channel.ExchangeAsync([0, 0x08, 0, 7],
+            (report, length) => length == 33 && report[0] == 0 && report[1] == 0x08
+                && report[2] == 0 && report[3] == 7 && report[4] <= 100,
+            TimeSpan.FromMilliseconds(750), cancellation);
+        return response is null ? null
+            : [new($"windows:{id}:Keyboard", "Клавиатура 2,4 ГГц", DeviceKind.Keyboard, "USB 2,4 ГГц",
+                [new("", response[4])], Wireless: true)];
     }
 
     private static async Task<DeviceSample[]?> ReadLogitechAsync(string path, string id, CancellationToken cancellation)
@@ -191,10 +207,15 @@ internal static class ReceiverBatteries
             return "";
         if (instance.Contains("VID_3554&PID_F503", StringComparison.OrdinalIgnoreCase))
             return kind == DeviceKind.Mouse ? "VGN 2.4G Mouse" : "";
+        if (IsViaKeyboardReceiver(instance))
+            return kind == DeviceKind.Keyboard ? "Клавиатура 2,4 ГГц" : "";
         if (instance.Contains("VID_36B0&PID_30CC", StringComparison.OrdinalIgnoreCase))
             return kind == DeviceKind.Keyboard ? "CIDOO QK75" : "";
         return name;
     }
+
+    public static bool IsViaKeyboardReceiver(string instance) =>
+        instance.Contains("VID_36B0&PID_3002", StringComparison.OrdinalIgnoreCase);
 
     private sealed record Receiver(ushort Page, ushort Usage, ushort Vendor, ushort[] Products,
         Func<string, string, CancellationToken, Task<DeviceSample[]?>> Read);

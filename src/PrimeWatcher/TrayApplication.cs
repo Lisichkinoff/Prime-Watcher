@@ -19,6 +19,7 @@ internal sealed class TrayApplication : IDisposable
     private const string RepositoryUrl = "https://github.com/Lisichkinoff/Prime-Watcher";
     private readonly Application application;
     private readonly TrayPanel panel = new();
+    private readonly BatteryWidget widget = new();
     private readonly TaskbarIndicators taskbar;
     private readonly DeviceMonitor monitor = new();
     private readonly UpdateManager updates = new(new GithubSource(RepositoryUrl, null, false));
@@ -26,6 +27,7 @@ internal sealed class TrayApplication : IDisposable
     private readonly Forms.NotifyIcon tray = new();
     private readonly Forms.ContextMenuStrip menu = new();
     private readonly Forms.ToolStripMenuItem restart;
+    private readonly Forms.ToolStripMenuItem toggleWidget;
     private AppSettings settings = AppSettings.Load();
     private Icon? icon;
     private string? iconKey;
@@ -39,8 +41,16 @@ internal sealed class TrayApplication : IDisposable
         this.application = application;
         taskbar = new TaskbarIndicators(() => OpenPanel());
         menu.Items.Add("Открыть Prime Watcher", null, (_, _) => OpenPanel());
-        menu.Items.Add("Настройки", null, (_, _) => OpenPanel(settings: true));
-        menu.Items.Add("Проверить обновления", null, (_, _) => CheckUpdates(manual: true));
+        menu.Items.Add("Настройки", null, (_, _) => OpenPanel(PanelView.Settings));
+        toggleWidget = new Forms.ToolStripMenuItem("Виджет поверх окон", null,
+            (_, _) => ChangeSettings(settings with { ShowWidget = !settings.ShowWidget }));
+        menu.Items.Add(toggleWidget);
+        menu.Items.Add("Проверить обновления", null, (_, _) =>
+        {
+            OpenPanel(PanelView.Settings);
+            panel.ScrollToUpdates();
+            CheckUpdates();
+        });
         restart = new Forms.ToolStripMenuItem("Перезапустить сейчас", null, (_, _) => ApplyUpdate()) { Visible = false };
         menu.Items.Add(restart);
         menu.Items.Add(new Forms.ToolStripSeparator());
@@ -60,9 +70,10 @@ internal sealed class TrayApplication : IDisposable
         {
             PinnedDevice = string.Equals(id, settings.PinnedDevice, StringComparison.OrdinalIgnoreCase) ? null : id
         });
-        panel.AutoStartRequested += enabled => ChangeSettings(settings with { AutoStart = enabled });
-        panel.TaskbarIndicatorsRequested += enabled => ChangeSettings(settings with { ShowTaskbarIndicators = enabled });
+        panel.SettingsChanged += change => ChangeSettings(change(settings));
+        widget.PositionChanged += position => ChangeSettings(settings with { WidgetLocation = position });
         panel.GuideDismissed += () => ChangeSettings(settings with { TrayGuideSeen = true });
+        panel.UpdateCheckRequested += CheckUpdates;
         panel.RestartRequested += ApplyUpdate;
         monitor.Changed += snapshot => application.Dispatcher.BeginInvoke(() =>
         {
@@ -70,16 +81,24 @@ internal sealed class TrayApplication : IDisposable
             scanned = true;
             Render();
         });
-        updateTimer.Tick += (_, _) => CheckUpdates(manual: false);
+        updateTimer.Tick += (_, _) => CheckUpdates();
     }
 
     public void Start()
     {
         panel.SetOptions(settings);
+        string version = updates.CurrentVersion?.ToString()
+            ?? typeof(TrayApplication).Assembly.GetName().Version?.ToString(3) ?? "—";
+        panel.SetUpdateVersion(version, updates.IsInstalled);
         if (updates.IsInstalled)
         {
+            panel.ShowUpdate("Новые релизы скачиваются автоматически.");
             try { AppSettings.RegisterAutoStart(settings.AutoStart); }
             catch (Exception ex) { Trace.WriteLine(ex); }
+        }
+        else
+        {
+            panel.ShowUpdate("Автообновление доступно после установки Prime Watcher.");
         }
         Render();
         tray.Visible = true;
@@ -102,11 +121,11 @@ internal sealed class TrayApplication : IDisposable
                     panel.Open(new Point(area.Right - 10, y - 1));
                 }
             }
-            CheckUpdates(manual: false);
+            CheckUpdates();
         });
     }
 
-    private void OpenPanel(bool settings = false) => panel.Open(Forms.Cursor.Position, settings);
+    private void OpenPanel(PanelView view = PanelView.Devices) => panel.Open(Forms.Cursor.Position, view);
 
     private void ChangeSettings(AppSettings next)
     {
@@ -126,7 +145,7 @@ internal sealed class TrayApplication : IDisposable
                 try { AppSettings.RegisterAutoStart(previous.AutoStart); }
                 catch (Exception rollback) { Trace.WriteLine(rollback); }
             }
-            panel.ShowUpdate("Не удалось сохранить настройки.", ReadyToRestart);
+            panel.ShowNotice("Не удалось сохранить настройки.");
         }
         panel.SetOptions(settings);
         Render();
@@ -134,88 +153,96 @@ internal sealed class TrayApplication : IDisposable
 
     private void Render()
     {
-        panel.Render(devices, settings.PinnedDevice, scanned);
-        taskbar.Render(devices, settings.PinnedDevice, settings.ShowTaskbarIndicators);
+        panel.Render(devices, settings, scanned);
+        taskbar.Render(devices, settings);
+        widget.Render(devices, settings);
+        toggleWidget.Checked = settings.ShowWidget;
         DeviceState? focus = settings.PinnedDevice is string id
             ? devices.FirstOrDefault(device => string.Equals(device.Device.Id, id, StringComparison.OrdinalIgnoreCase))
-            : devices.FirstOrDefault(device => device.Connected && device.Device.Readings.Count > 0)
+            : devices.FirstOrDefault(device => device.HasCurrentReading)
+                ?? devices.FirstOrDefault(device => device.KeepLastChargeVisible)
                 ?? devices.FirstOrDefault(device => device.Connected);
         var appearance = TrayIcon.Appearance(focus);
         if (focus is null && settings.PinnedDevice is not null && scanned)
             appearance = ("offline", null, null, true);
-        if (appearance.Key != iconKey)
+        bool showAppIcon = appearance is { Percent: null, Level: null, Offline: false } && settings.PinnedDevice is null;
+        string nextIconKey = showAppIcon ? "app" : appearance.Key;
+        if (nextIconKey != iconKey)
         {
-            var next = TrayIcon.Create(appearance.Percent, appearance.Level, appearance.Offline);
+            var next = showAppIcon ? LoadAppIcon()
+                : TrayIcon.Create(appearance.Percent, appearance.Level, appearance.Offline, focus?.IsLastReading == true);
             tray.Icon = next;
             icon?.Dispose();
             icon = next;
-            iconKey = appearance.Key;
+            iconKey = nextIconKey;
         }
 
         string tooltip = focus is not null
-            ? $"{focus.Device.Name} · {(focus.Connected ? focus.Device.Charge : "Отключено")}"
+            ? $"{focus.Device.Name} · {(focus.Connected || focus.KeepLastChargeVisible ? focus.Charge : "Отключено")}"
             : appearance.Offline ? "Prime Watcher · Устройство отключено" : "Prime Watcher";
         tray.Text = tooltip.Length <= 127 ? tooltip : tooltip[..126] + "…";
     }
 
+    private static Icon LoadAppIcon()
+    {
+        using var stream = Application.GetResourceStream(new Uri("PrimeWatcher.ico", UriKind.Relative)).Stream;
+        return new Icon(stream, 16, 16);
+    }
+
     private bool ReadyToRestart => updates.IsInstalled && updates.UpdatePendingRestart is not null;
 
-    private async void CheckUpdates(bool manual)
+    private async void CheckUpdates()
     {
-        if (manual)
-            OpenPanel();
-        if (checking)
-        {
-            if (manual)
-                panel.ShowUpdate("Идёт проверка обновлений…", false);
+        if (checking || !updates.IsInstalled)
             return;
-        }
-        if (!updates.IsInstalled)
-        {
-            if (manual)
-                panel.ShowUpdate("Автообновление доступно после установки Prime Watcher.", false);
-            return;
-        }
 
         updateTimer.Stop();
         checking = true;
+        bool downloading = false;
         TimeSpan interval = TimeSpan.FromDays(1);
         try
         {
-            restart.Visible = ReadyToRestart;
-            if (ReadyToRestart)
+            if (updates.UpdatePendingRestart is { } pending)
             {
-                panel.ShowUpdate("Обновление готово к установке.", true);
+                ShowReadyUpdate(pending.Version.ToString());
                 return;
             }
-            if (manual)
-                panel.ShowUpdate("Проверка обновлений…", false);
+            restart.Visible = false;
+            panel.ShowUpdate("Проверка обновлений…", busy: true);
             UpdateInfo? available = await updates.CheckForUpdatesAsync();
+            if (disposed)
+                return;
             if (available is null)
             {
-                if (manual)
-                    panel.ShowUpdate($"Установлена актуальная версия {updates.CurrentVersion}.", false);
+                panel.ShowUpdate("Установлена актуальная версия. Проверка повторится автоматически.");
                 return;
             }
 
-            if (manual)
-                panel.ShowUpdate("Скачивание обновления…", false);
-            await updates.DownloadUpdatesAsync(available);
+            string version = available.TargetFullRelease.Version.ToString();
+            downloading = true;
+            panel.ShowUpdate($"Скачивание версии {version}…", busy: true, progress: 0);
+            IProgress<int> progress = new Progress<int>(percent =>
+            {
+                if (downloading && !disposed)
+                    panel.ShowUpdate($"Скачивание версии {version} · {percent}%", busy: true, progress: percent);
+            });
+            await updates.DownloadUpdatesAsync(available, progress.Report);
+            downloading = false;
             if (disposed)
                 return;
-            restart.Visible = true;
-            panel.ShowUpdate($"Версия {available.TargetFullRelease.Version} готова к установке.", true);
-            tray.ShowBalloonTip(3500, "Prime Watcher", "Обновление установится при следующем запуске.", Forms.ToolTipIcon.Info);
+            ShowReadyUpdate(version);
+            tray.ShowBalloonTip(3500, "Prime Watcher", $"Версия {version} установится при следующем запуске.", Forms.ToolTipIcon.Info);
         }
         catch (Exception ex)
         {
             Trace.WriteLine(ex);
             interval = TimeSpan.FromHours(1);
-            if (manual && !disposed)
-                panel.ShowUpdate("Проверить или скачать обновление не удалось. Повторим через час.", false);
+            if (!disposed)
+                panel.ShowUpdate("Проверить или скачать обновление не удалось. Повторим через час.");
         }
         finally
         {
+            downloading = false;
             checking = false;
             if (!disposed)
             {
@@ -223,6 +250,12 @@ internal sealed class TrayApplication : IDisposable
                 updateTimer.Start();
             }
         }
+    }
+
+    private void ShowReadyUpdate(string version)
+    {
+        restart.Visible = true;
+        panel.ShowUpdate($"Версия {version} скачана. Обновление установится при следующем запуске.", ready: true);
     }
 
     private void ApplyUpdate()
@@ -235,8 +268,9 @@ internal sealed class TrayApplication : IDisposable
         catch (Exception ex)
         {
             Trace.WriteLine(ex);
-            OpenPanel();
-            panel.ShowUpdate("Перезапуск не удался. Обновление доступно при следующем запуске.", true);
+            OpenPanel(PanelView.Settings);
+            panel.ScrollToUpdates();
+            panel.ShowUpdate("Перезапуск не удался. Обновление установится при следующем запуске.", ready: true);
         }
     }
 

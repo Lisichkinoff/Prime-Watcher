@@ -1,44 +1,44 @@
-# План реализации Prime Watcher для Windows
+# Prime Watcher for Windows implementation plan
 
-**Prime Watcher** запускается при входе в Windows и работает в системном трее. Один клик по значку рядом с часами открывает компактную панель с зарядом наушников, мыши, клавиатуры и геймпада. Пользователь один раз устанавливает приложение через `PrimeWatcher-Setup.exe`. Последующие версии программа сама получает из GitHub Releases.
+**Prime Watcher** starts at Windows sign-in and runs in the system tray. Clicking its icon next to the clock opens a compact panel with battery readings for headsets, mice, keyboards, and gamepads. Users install it with `PrimeWatcher-Setup.exe`. The app fetches updates from GitHub Releases.
 
-## 1. Проверить, какие данные передают устройства
+## 1. Check what battery data devices report
 
-Начать с прототипа на четырёх реальных устройствах. Для каждого записать модель, способ подключения и доступные показания. Это позволит определить поддержку конкретных моделей ещё до разработки интерфейса.
+Start with a prototype and four physical devices. Record the model, connection method, and available readings for each one. This identifies supported models before work begins on the interface.
 
-| Устройство | Как получать заряд |
+| Device | How to read the battery |
 | --- | --- |
-| Наушники | Проверить свойства устройства в Windows и, для Bluetooth LE, стандартный Battery Service. Если модель передаёт заряд левого наушника, правого наушника и кейса отдельно, показать все три значения. |
-| Мышь и клавиатура | Для Bluetooth проверить системные свойства и Battery Service. Для моделей с USB-приёмником 2,4 ГГц проверить HID-отчёты или интерфейс производителя. Если к одному приёмнику подключены два устройства, выводить каждое отдельной строкой. |
-| Геймпад | Использовать процент, когда он доступен. Для совместимых контроллеров предусмотреть XInput, который сообщает один из четырёх уровней заряда — разряжен, низкий, средний или полный. |
+| Headset | Check Windows device properties and the standard Battery Service for Bluetooth LE. Show separate readings for the left earbud, right earbud, and charging case when the model reports them. |
+| Mouse and keyboard | For Bluetooth, check Windows device properties and the Battery Service. For 2.4 GHz USB receivers, check HID reports or the manufacturer's interface. Show one row per device when a receiver serves multiple peripherals. |
+| Gamepad | Show a percentage when available. Use XInput for compatible controllers that report one of four battery levels: empty, low, medium, or full. |
 
-Процент показывать только тогда, когда его сообщает устройство или драйвер. Если доступен лишь уровень, вывести, например, «Низкий заряд». Если подключённое устройство не передаёт показаний, оставить его в списке с пометкой «Заряд недоступен». [Bluetooth GATT в Windows](https://learn.microsoft.com/en-us/windows/apps/develop/devices-sensors/gatt-client) · [Уровни заряда XInput](https://learn.microsoft.com/en-us/windows/win32/api/xinput/ns-xinput-xinput_battery_information)
+Display a percentage when the device or driver reports one. Display a label such as “Low battery” when only a battery level is available. Keep a connected device in the list and label its battery status as unavailable when it supplies no reading. [Bluetooth GATT on Windows](https://learn.microsoft.com/en-us/windows/apps/develop/devices-sensors/gatt-client), [XInput battery levels](https://learn.microsoft.com/en-us/windows/win32/api/xinput/ns-xinput-xinput_battery_information)
 
-## 2. Реализовать фоновый сбор показаний
+## 2. Collect battery readings in the background
 
-- При запуске находить подключённые устройства. При подключении, отключении и выходе компьютера из сна обновлять список автоматически.
-- Для устройств, которые сообщают об изменении заряда, подписаться на эти события. Остальные периодически опрашивать, пока они подключены. [События Bluetooth GATT](https://learn.microsoft.com/en-us/windows/apps/develop/devices-sensors/gatt-client)
-- После отключения помечать последнее показание временем получения, например «Отключена · последний заряд 65% в 14:30». При повторном подключении запрашивать свежие данные.
+- Discover connected devices at startup. Refresh the list when devices connect or disconnect and when the computer resumes from sleep.
+- Subscribe to battery change notifications when the device provides them. Poll the remaining devices while they are connected. [Bluetooth GATT notifications](https://learn.microsoft.com/en-us/windows/apps/develop/devices-sensors/gatt-client)
+- On disconnect, keep the last reading and its timestamp. Request a fresh reading on reconnection.
 
-## 3. Сделать трей основным интерфейсом
+## 3. Use the system tray as the main interface
 
-- **Значок рядом с часами** показывает заряд выбранного устройства. Пользователь может закрепить, например, мышь и видеть её процент без клика. При отключении устройства значок меняет состояние.
-- **Левый клик** открывает панель со всеми устройствами. В каждой строке видны название, заряд и состояние подключения. **Правый клик** открывает меню с настройками, проверкой обновлений и выходом.
-- Закрытие панели оставляет мониторинг в фоне. Добавить отключаемый автозапуск при входе в Windows и восстановление значка после перезапуска Проводника.
-- При первом запуске показать, как закрепить значок рядом с часами. Приложение может постоянно держать его в области уведомлений, но видимость за пределами меню скрытых значков определяет пользователь. [Область уведомлений Windows](https://learn.microsoft.com/en-us/windows/win32/shell/notification-area)
+- The icon next to the clock shows the selected device's charge. Let the user pin a device to see its charge at a glance. Update the icon when the device disconnects.
+- Left-click opens the device list with the name, battery reading, and connection status. Right-click opens a menu with settings, update checks, and exit.
+- Closing the panel leaves monitoring active. Provide an option to launch at sign-in and restore the tray icon after File Explorer restarts.
+- On first launch, show how to move the icon out of the notification area overflow menu. Windows lets the user choose whether it remains visible next to the clock. [Windows notification area](https://learn.microsoft.com/en-us/windows/win32/shell/notification-area)
 
-## 4. Подготовить установщик
+## 4. Package the Windows installer
 
-Для первой версии подойдут **C# и .NET**, **WPF** для панели и **Velopack** для установки и обновлений. Результатом сборки должен быть `PrimeWatcher-Setup.exe`, который устанавливает приложение для текущего пользователя и сразу запускает его в трее. Настройки и выбор устройства для значка хранить отдельно от файлов программы, чтобы они сохранялись при обновлении. [Установщики Velopack](https://docs.velopack.io/packaging/installer)
+Build the app in C# and .NET with WPF for the panel and Velopack for installation and updates. Produce `PrimeWatcher-Setup.exe` to install for the current user and start the app in the tray. Store settings and the pinned device outside the application directory so they survive updates. [Velopack installers](https://docs.velopack.io/packaging/installer)
 
-## 5. Встроить автоматические обновления из GitHub Releases
+## 5. Fetch updates from GitHub Releases
 
-1. При выпуске версии GitHub Actions собирает приложение и публикует в стабильном релизе установщик, пакет обновления и индекс версий Velopack.
-2. Prime Watcher при запуске и затем раз в сутки проверяет релизы через `GithubSource`. В меню трея также доступна команда «Проверить обновления».
-3. При появлении новой версии программа скачивает пакет в фоне и проверяет его целостность. Пользователь может нажать «Перезапустить сейчас» либо продолжить работу — тогда обновление применится при следующем запуске.
-4. Если GitHub недоступен или загрузка прервалась, мониторинг заряда продолжается. Программа повторяет попытку позже. Открывать браузер и скачивать новый установщик вручную не требуется. [Обновления из GitHub Releases в Velopack](https://docs.velopack.io/integrating/update-sources)
+1. Use GitHub Actions to build and publish a stable release with the installer, update package, and Velopack index.
+2. Check for updates at startup and once a day using `GithubSource`. Offer a manual check in the tray menu.
+3. Download new releases in the background and verify the update package. Offer to restart immediately. Otherwise, apply the package at the next launch.
+4. Keep battery monitoring active if GitHub is unavailable or a download is interrupted. Retry later. [Velopack update sources](https://docs.velopack.io/integrating/update-sources)
 
-## 6. Проверить готовность к выпуску
+## 6. Verify the release
 
-- **Устройства и трей.** Установить приложение на чистой Windows, подключить все четыре устройства, проверить показания, отключить и снова подключить одно из них. После сна и повторного входа в Windows панель должна показывать актуальный список без дубликатов.
-- **Обновление.** Установить версию `1.0.0`, выбрать устройство для значка и выпустить тестовую `1.0.1`. Убедиться, что программа сама находит релиз, восстанавливается после прерванной загрузки и возвращается в трей с новой версией и сохранёнными настройками.
+- **Devices and tray.** Install on a clean Windows system and connect one device of each type. Verify readings, disconnect and reconnect a device, then check for current readings and duplicate entries after sleep and sign-in.
+- **Updates.** Install version `1.0.0`, pin a device, and publish a test release of `1.0.1`. Confirm that the app discovers it, recovers from an interrupted download, and returns to the tray with the new version and the same settings.

@@ -1,43 +1,45 @@
 # Prime Watcher
 
-Prime Watcher показывает заряд наушников, мышей, клавиатур и геймпадов. Рядом с областью уведомлений на основной панели задач отображается ряд «значок устройства + заряд». Нажатие на ряд или левый клик по значку в трее открывает список. Правый клик открывает настройки, проверку обновлений и выход. Кнопка «Закрепить» устанавливает приоритет устройства и выводит его заряд на значок в трее.
+Prime Watcher monitors the battery levels of wireless headsets, mice, keyboards, and gamepads on Windows. Battery indicators sit next to the system tray on the primary taskbar. Click the indicators or the tray icon to open the device list. Right-click the tray icon for settings, updates, and exit. Pin a device to prioritize it on the taskbar and show its charge in the tray icon.
 
-Ряд автоматически использует свободное место слева от трея и скрывается, когда оно заканчивается, панель задач скрыта или на экране активно полноэкранное приложение. Ряд можно отключить в настройках.
+## Taskbar and floating widget
 
-Подключённый геймпад и распознанная беспроводная клавиатура появляются сразу. Прочерк означает, что устройство подключено и заряд недоступен. Если геймпад передаёт только уровень, вместо процента отображаются полоски. При нескольких устройствах одного типа в ряду отображается одно, а в списке доступны все.
+The taskbar indicators use the available space to the left of the tray. They hide when there is no room, when the taskbar is hidden, or when a full-screen app is active. In **Settings**, choose individual devices or entire device types, hide devices without a reading, show one or multiple devices per type, or display icons without values.
 
-## Установка
+The **Widget** tab offers two modes. Keep the widget above other windows, or show it only when the pinned device reaches the low-battery threshold. The frame pulses and a warning appears for eight seconds. The widget hides afterward in alert-only mode. A new alert can appear once the device charges above the threshold and drops to it again. Drag the header to move the widget and enable click-through to send mouse input to the window underneath. The widget works with windowed and borderless games. Visibility in exclusive full-screen mode depends on the game and the Windows graphics mode.
 
-Скачайте `PrimeWatcher-Setup.exe` из [GitHub Releases](https://github.com/Lisichkinoff/Prime-Watcher/releases/latest). Сборка предназначена для Windows 11 и Windows 10 LTSC 2021 на x64. Установщик работает для текущего пользователя и включает .NET. Автозапуск можно отключить в настройках.
+If a wireless mouse or keyboard stops responding while asleep, Prime Watcher shows its last reading from the current session in a muted color. The tooltip includes the time of that reading. A fresh reading replaces it whether the charge rises or falls. A dash indicates that a battery reading is unavailable. Controllers that report a battery level display bars.
 
-В первый раз Prime Watcher покажет, как перенести значок из меню скрытых значков к часам. При отключении устройства приложение показывает последнее измерение и время его получения в текущем сеансе.
+## Installation and updates
 
-## Поддержка устройств
+Download `PrimeWatcher-Setup.exe` from the [latest GitHub release](https://github.com/Lisichkinoff/Prime-Watcher/releases/latest). The x64 installer supports Windows 11 and Windows 10 LTSC 2021. It includes .NET and installs for the current user. Launching at sign-in can be disabled in settings. On first launch, Prime Watcher shows how to move its icon from the tray overflow menu to the area next to the clock.
 
-| Подключение | Что показывает приложение |
+After installation, Prime Watcher checks for stable releases at startup and once a day. It downloads updates in the background and retries after an hour if a check or download fails. **Settings → Updates** shows the installed version and download progress. Downloaded updates apply the next time Prime Watcher starts. Select **Restart now** to apply one immediately. Device selections and preferences are stored in `%LOCALAPPDATA%\PrimeWatcherSettings`.
+
+## Device support
+
+| Connection | Battery information |
 | --- | --- |
-| Bluetooth LE | Процент из Battery Service. Если доступны отдельные батареи, отображаются все показания и переданные устройством обозначения. |
-| Bluetooth Classic и HID | Процент, если его передаёт Windows или драйвер. Для обнаруженного устройства без показаний выводится «Заряд недоступен». |
-| USB-приёмники | Предусмотрено чтение HyperX Cloud III S Wireless, VGN 2.4G Mouse (`3554:F503`) и совместимых моделей на Logitech HID++ 2.0. Для совместимых Logitech отображается отдельная строка на каждое ответившее устройство. Остальные приёмники зависят от данных драйвера. |
-| XInput | Один из четырёх уровней заряда беспроводного геймпада. Процент выводится, если он доступен отдельно через Windows или Bluetooth. |
+| Bluetooth LE | Percentage from the Battery Service. When a device reports multiple batteries, Prime Watcher displays their separate readings and labels. |
+| Bluetooth Classic and HID | Percentage when Windows or the device driver provides it. Detected devices remain listed when charge is unavailable. |
+| USB receivers | HyperX Cloud III S Wireless, VGN 2.4G Mouse (`3554:F503`), compatible Logitech HID++ 2.0 devices, and keyboards with a `36B0:3002` receiver whose firmware reports a battery percentage through VIA. Other receivers depend on the driver. |
+| XInput | Four battery levels for compatible wireless controllers. Prime Watcher shows a percentage when it is available separately through Windows or Bluetooth. |
 
-Описание [Bluetooth Battery Service](https://www.bluetooth.com/wp-content/uploads/Files/Specification/HTML/BAS_v1.1/out/en/index-en.html), [Logitech HID++](https://github.com/Logitech/cpg-docs/tree/master/hidpp20), измерения USB-обмена [HyperX](https://github.com/Sapd/HeadsetControl/issues/486) и [VGN](https://github.com/wushuai0802/myfinder-device-battery/issues/592), документация [XInput](https://learn.microsoft.com/en-us/windows/win32/api/xinput/ns-xinput-xinput_battery_information).
+Protocol references include [Bluetooth Battery Service](https://www.bluetooth.com/wp-content/uploads/Files/Specification/HTML/BAS_v1.1/out/en/index-en.html), [Logitech HID++](https://github.com/Logitech/cpg-docs/tree/master/hidpp20), [HyperX USB reports](https://github.com/Sapd/HeadsetControl/issues/486), [VGN USB reports](https://github.com/wushuai0802/myfinder-device-battery/issues/592), [VIA battery reports on the 36B0:3002 receiver](https://github.com/HeyOkay/HaloBattery/blob/main/docs/protocols.md#urx-core75-24-ghz), and [XInput battery information](https://learn.microsoft.com/en-us/windows/win32/api/xinput/ns-xinput-xinput_battery_information).
 
-## Сборка и выпуск
+## Build and release
 
-В Windows с .NET SDK 10 и PowerShell 7:
+Run these commands on Windows with the .NET 10 SDK and PowerShell 7.
 
 ```powershell
 dotnet build src/PrimeWatcher/PrimeWatcher.csproj -c Release
-./scripts/package.ps1 -Version 1.0.2
+./scripts/package.ps1 -Version 1.0.4
 ```
 
-Установщик, пакет обновления и индекс появятся в `artifacts/release-1.0.2/`. Тег вида `v1.0.2` запускает сборку и публикацию стабильного релиза через GitHub Actions. Приложение проверяет стабильные релизы при запуске и раз в сутки, а после ошибки повторяет попытку через час. Загруженное обновление можно применить сразу или при следующем запуске. Выбранное устройство и настройки хранятся в `%LOCALAPPDATA%\PrimeWatcherSettings`.
+The installer, update package, and release index go into `artifacts/release-1.0.4/`. Pushing a version tag such as `v1.0.4` builds and publishes a stable GitHub release through GitHub Actions.
 
-Для проверки источников заряда без запуска панели выполните:
+Run diagnostics to inspect detected devices and reported battery levels without opening the tray panel.
 
 ```powershell
-Start-Process .\artifacts\publish-1.0.2\PrimeWatcher.exe -ArgumentList '--diagnostics', 'devices.json' -Wait
+Start-Process .\artifacts\publish-1.0.4\PrimeWatcher.exe -ArgumentList '--diagnostics', 'devices.json' -Wait
 ```
-
-План и сценарии ручной проверки находятся в [PLAN.md](PLAN.md).

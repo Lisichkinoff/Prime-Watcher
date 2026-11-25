@@ -13,23 +13,24 @@ internal static class TrayIcon
     {
         if (state is null)
             return ("idle", null, null, false);
-        if (!state.Connected)
+        if (!state.Connected && !state.KeepLastChargeVisible)
             return ("offline", null, null, true);
 
-        var readings = state.Device.Readings;
+        var readings = state.DisplayReadings;
         BatteryReading? reading = readings.FirstOrDefault(value => value.Label is "" or "Основной" && value.Percent.HasValue)
             ?? readings.Where(value => value.Percent.HasValue).OrderBy(value => value.Percent).FirstOrDefault()
             ?? readings.FirstOrDefault(value => value.Level.HasValue);
-        return (reading?.Text ?? "unknown", reading?.Percent, reading?.Level, false);
+        string key = reading?.Text ?? "unknown";
+        return (state.IsLastReading ? $"last:{key}" : key, reading?.Percent, reading?.Level, false);
     }
 
-    public static Icon Create(int? percent, BatteryLevel? level, bool offline)
+    public static Icon Create(int? percent, BatteryLevel? level, bool offline, bool lastReading = false)
     {
         using var bitmap = new Bitmap(32, 32);
         using var graphics = Graphics.FromImage(bitmap);
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
         graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-        Color fill = offline ? Color.FromArgb(65, 73, 86) : percent <= 15 || level is BatteryLevel.Empty or BatteryLevel.Low
+        Color fill = offline || lastReading ? Color.FromArgb(65, 73, 86) : percent <= 15 || level is BatteryLevel.Empty or BatteryLevel.Low
             ? Color.FromArgb(161, 47, 47) : Color.FromArgb(22, 78, 69);
         using var background = new SolidBrush(fill);
         graphics.FillEllipse(background, 1, 1, 30, 30);

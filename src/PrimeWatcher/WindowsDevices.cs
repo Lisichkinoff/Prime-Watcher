@@ -155,7 +155,8 @@ internal sealed class WindowsDevices(Action requestRefresh) : IDisposable
             var readings = PercentReading(group.Select(item => item.Percent).Append(ReadPercent(container)));
             bool wireless = chosen.Instance.Contains("BTH", StringComparison.OrdinalIgnoreCase)
                 || readings.Count > 0 || LooksWireless(name);
-            var sample = new DeviceSample(group.Key, name, chosen.Kind, "HID / Windows", readings, wireless);
+            string transport = ReceiverBatteries.IsViaKeyboardReceiver(chosen.Instance) ? "USB 2,4 ГГц" : "HID / Windows";
+            var sample = new DeviceSample(group.Key, name, chosen.Kind, transport, readings, wireless);
             if (chosen.IsXInput && xinput.Length > 0)
                 matchedControllers.Add(sample);
             else

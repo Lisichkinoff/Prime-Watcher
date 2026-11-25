@@ -16,6 +16,7 @@ internal static class Program
     private static int Main(string[] args)
     {
         VelopackApp.Build()
+            .SetAutoApplyOnStartup(true)
             .OnBeforeUninstallFastCallback(_ => AppSettings.RegisterAutoStart(false))
             .Run();
 

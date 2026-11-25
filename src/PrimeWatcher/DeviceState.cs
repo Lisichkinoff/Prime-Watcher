@@ -24,6 +24,8 @@ internal sealed record DeviceSample(string Id, string Name, DeviceKind Kind, str
     IReadOnlyList<BatteryReading> Readings, bool Wireless = false)
 {
     public string Charge => FormatCharge(Readings);
+    public bool CanAppearOnTaskbar => Kind == DeviceKind.Gamepad || Wireless || Readings.Count > 0;
+    public bool HasBatteryReading => Readings.Any(reading => reading.Percent.HasValue || reading.Level.HasValue);
 
     public static string FormatCharge(IReadOnlyList<BatteryReading> readings) => readings.Count == 0
         ? "Заряд недоступен"
@@ -34,15 +36,23 @@ internal sealed record DeviceSample(string Id, string Name, DeviceKind Kind, str
 internal sealed record DeviceState(DeviceSample Device, bool Connected,
     IReadOnlyList<BatteryReading> LastReadings, DateTimeOffset? ObservedAt)
 {
+    public bool HasCurrentReading => Connected && Device.HasBatteryReading;
+    public IReadOnlyList<BatteryReading> DisplayReadings => HasCurrentReading ? Device.Readings : LastReadings;
+    public bool IsLastReading => !HasCurrentReading && LastReadings.Count > 0;
+    public bool KeepLastChargeVisible => Device.Wireless && Device.Kind is (DeviceKind.Mouse or DeviceKind.Keyboard)
+        && LastReadings.Count > 0;
+
     public string Detail => Connected
-        ? $"Подключено · {Device.Transport}"
+        ? IsLastReading && ObservedAt is DateTimeOffset observed
+            ? $"Последний замер · {observed.ToLocalTime():dd.MM.yyyy HH:mm}"
+            : $"Подключено · {Device.Transport}"
         : ObservedAt is DateTimeOffset time
             ? $"Отключено · {time.ToLocalTime():dd.MM.yyyy HH:mm}"
             : "Отключено";
 
-    public string Charge => Connected ? Device.Charge : LastReadings.Count > 0
+    public string Charge => IsLastReading
         ? $"Последний заряд · {DeviceSample.FormatCharge(LastReadings)}"
-        : "Заряд недоступен";
+        : DeviceSample.FormatCharge(DisplayReadings);
 }
 
 internal sealed class DeviceHistory
@@ -56,9 +66,11 @@ internal sealed class DeviceHistory
         {
             present.Add(sample.Id);
             states.TryGetValue(sample.Id, out DeviceState? previous);
+            var current = !sample.Wireless && previous is { Device.Wireless: true }
+                ? sample with { Wireless = true } : sample;
             var observed = sample.Readings.Where(value => value.Percent.HasValue || value.Level.HasValue)
                 .Select(value => (DateTimeOffset?)(value.ObservedAt ?? now)).Max();
-            states[sample.Id] = new DeviceState(sample, true,
+            states[sample.Id] = new DeviceState(current, true,
                 observed.HasValue ? sample.Readings : previous?.LastReadings ?? [],
                 observed ?? previous?.ObservedAt);
         }

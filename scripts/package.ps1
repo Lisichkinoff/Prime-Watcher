@@ -1,6 +1,6 @@
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$Version = '1.0.2',
+    [string]$Version = '1.0.4',
     [string]$OutputDirectory = 'artifacts'
 )
 
@@ -13,7 +13,7 @@ try {
     $packages = Join-Path $outputRoot "release-$Version"
     dotnet tool restore
     dotnet publish src/PrimeWatcher/PrimeWatcher.csproj -c Release -r win-x64 --self-contained true -p:Version=$Version -warnaserror --nologo -o $publish
-    dotnet vpk pack --skip-updates --packId PrimeWatcher --packVersion $Version --packTitle 'Prime Watcher' --mainExe PrimeWatcher.exe --packDir $publish --outputDir $packages --runtime win10-x64 --channel win-x64 --noPortable
+    dotnet vpk pack --skip-updates --packId PrimeWatcher --packVersion $Version --packTitle 'Prime Watcher' --mainExe PrimeWatcher.exe --packDir $publish --outputDir $packages --runtime win10-x64 --channel win-x64 --icon src/PrimeWatcher/PrimeWatcher.ico --noPortable
 
     $installer = @(Get-ChildItem -LiteralPath $packages -Filter '*-Setup.exe' | Where-Object Name -ne 'PrimeWatcher-Setup.exe')
     if ($installer.Count -gt 1) {
