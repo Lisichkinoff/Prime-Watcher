@@ -17,6 +17,7 @@ internal partial class TrayPanel : Window
 {
     public event Action<string>? PinRequested;
     public event Action<bool>? AutoStartRequested;
+    public event Action<bool>? TaskbarIndicatorsRequested;
     public event Action? GuideDismissed;
     public event Action? RestartRequested;
     private Point anchor;
@@ -46,7 +47,11 @@ internal partial class TrayPanel : Window
         Empty.Text = scanned ? "Подключённые устройства не найдены." : "Поиск подключённых устройств…";
     }
 
-    public void SetAutoStart(bool enabled) => AutoStart.IsChecked = enabled;
+    public void SetOptions(AppSettings settings)
+    {
+        AutoStart.IsChecked = settings.AutoStart;
+        ShowTaskbarIndicators.IsChecked = settings.ShowTaskbarIndicators;
+    }
 
     public void ShowGuide() => Guide.Visibility = Visibility.Visible;
 
@@ -109,6 +114,8 @@ internal partial class TrayPanel : Window
     private void ClosePanel(object sender, RoutedEventArgs args) => Hide();
     private void PinDevice(object sender, RoutedEventArgs args) => PinRequested?.Invoke((string)((Button)sender).Tag);
     private void AutoStartChanged(object sender, RoutedEventArgs args) => AutoStartRequested?.Invoke(AutoStart.IsChecked == true);
+    private void TaskbarIndicatorsChanged(object sender, RoutedEventArgs args) =>
+        TaskbarIndicatorsRequested?.Invoke(ShowTaskbarIndicators.IsChecked == true);
     private void RestartClicked(object sender, RoutedEventArgs args) => RestartRequested?.Invoke();
 
     private void DismissGuide(object sender, RoutedEventArgs args)

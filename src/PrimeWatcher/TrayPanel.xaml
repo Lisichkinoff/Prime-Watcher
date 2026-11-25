@@ -69,8 +69,12 @@
             </Border>
             <Border x:Name="Settings" DockPanel.Dock="Top" Background="#1C293D" CornerRadius="7" Padding="11"
                     Margin="0,0,0,10" Visibility="Collapsed">
-                <CheckBox x:Name="AutoStart" Content="Запускать при входе в Windows" Foreground="{StaticResource Text}"
-                          Click="AutoStartChanged" />
+                <StackPanel>
+                    <CheckBox x:Name="AutoStart" Content="Запускать при входе в Windows" Foreground="{StaticResource Text}"
+                              Click="AutoStartChanged" />
+                    <CheckBox x:Name="ShowTaskbarIndicators" Content="Показывать заряд на панели задач"
+                              Foreground="{StaticResource Text}" Margin="0,8,0,0" Click="TaskbarIndicatorsChanged" />
+                </StackPanel>
             </Border>
             <Border x:Name="UpdateBanner" DockPanel.Dock="Bottom" Background="#20364A" CornerRadius="7"
                     Padding="11" Margin="0,10,0,0" Visibility="Collapsed">

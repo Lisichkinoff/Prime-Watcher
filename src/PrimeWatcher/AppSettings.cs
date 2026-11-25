@@ -8,6 +8,8 @@ namespace PrimeWatcher;
 
 internal sealed record AppSettings(bool AutoStart = true, bool TrayGuideSeen = false, string? PinnedDevice = null)
 {
+    public bool ShowTaskbarIndicators { get; init; } = true;
+
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunValue = "PrimeWatcher";
     private static readonly string DirectoryPath =

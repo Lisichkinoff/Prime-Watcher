@@ -1,0 +1,133 @@
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Windows;
+using System.Windows.Automation;
+using Microsoft.Win32;
+using Forms = System.Windows.Forms;
+
+namespace PrimeWatcher;
+
+internal sealed record TaskbarLayout(int Left, int Top, int Right, int Height, double Scale, bool Light)
+{
+    public static TaskbarLayout? Read()
+    {
+        IntPtr taskbar = FindWindow("Shell_TrayWnd", null);
+        if (taskbar == IntPtr.Zero || !IsWindowVisible(taskbar) || !GetWindowRect(taskbar, out var bar)
+            || bar.Width <= bar.Height)
+            return null;
+
+        IntPtr notificationArea = FindWindowEx(taskbar, IntPtr.Zero, "TrayNotifyWnd", null);
+        if (notificationArea == IntPtr.Zero || !GetWindowRect(notificationArea, out var tray)
+            || tray.Left <= bar.Left || tray.Right > bar.Right || tray.Width <= 0)
+            return null;
+
+        var monitor = Forms.Screen.FromHandle(taskbar).Bounds;
+        double scale = Math.Max(96, GetDpiForWindow(taskbar)) / 96.0;
+        int visibleHeight = Math.Min(bar.Bottom, monitor.Bottom) - Math.Max(bar.Top, monitor.Top);
+        if (visibleHeight < Math.Ceiling(30 * scale) || visibleHeight != bar.Height || IsFullscreen(monitor))
+            return null;
+
+        try
+        {
+            var left = LeftOfGap(taskbar, bar, tray.Left);
+            if (left is null)
+                return null;
+
+            int margin = (int)Math.Ceiling(6 * scale);
+            bool light = Registry.GetValue(
+                @"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+                "SystemUsesLightTheme", 0) is 1;
+            return new TaskbarLayout(left.Value + margin, bar.Top, tray.Left - margin, bar.Height, scale, light);
+        }
+        catch (Exception ex) when (ex is ElementNotAvailableException or COMException or InvalidOperationException
+            or UnauthorizedAccessException)
+        {
+            Trace.WriteLine(ex);
+            return null;
+        }
+    }
+
+    private static int? LeftOfGap(IntPtr taskbar, NativeRect bar, int trayLeft)
+    {
+        AutomationElement root = AutomationElement.FromHandle(taskbar);
+        var controls = new OrCondition(
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.SplitButton),
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem),
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem),
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Hyperlink));
+        var cache = new CacheRequest { AutomationElementMode = AutomationElementMode.None };
+        cache.Add(AutomationElement.BoundingRectangleProperty);
+        cache.Add(AutomationElement.IsOffscreenProperty);
+        int left = bar.Left;
+        bool foundButton = false;
+        using (cache.Activate())
+        {
+            foreach (AutomationElement item in root.FindAll(TreeScope.Descendants, controls))
+            {
+                Rect bounds = item.Cached.BoundingRectangle;
+                if (item.Cached.IsOffscreen || bounds.IsEmpty || bounds.Width <= 0
+                    || bounds.Top >= bar.Bottom || bounds.Bottom <= bar.Top || bounds.Left >= trayLeft)
+                    continue;
+
+                foundButton = true;
+                left = Math.Max(left, (int)Math.Ceiling(bounds.Right));
+            }
+        }
+        return foundButton ? left : null;
+    }
+
+    private static bool IsFullscreen(System.Drawing.Rectangle monitor)
+    {
+        IntPtr window = GetForegroundWindow();
+        if (window == IntPtr.Zero || window == GetShellWindow())
+            return false;
+        var className = new StringBuilder(128);
+        GetClassName(window, className, className.Capacity);
+        if (className.ToString() is "WorkerW" or "Progman" or "Shell_TrayWnd")
+            return false;
+        return DwmGetWindowAttribute(window, 9, out var rect, Marshal.SizeOf<NativeRect>()) == 0
+            && rect.Left <= monitor.Left && rect.Top <= monitor.Top
+            && rect.Right >= monitor.Right && rect.Bottom >= monitor.Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left, Top, Right, Bottom;
+        public readonly int Width => Right - Left;
+        public readonly int Height => Bottom - Top;
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr FindWindow(string className, string? title);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string? title);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(IntPtr window, StringBuilder name, int maxCount);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(IntPtr window, out NativeRect rect);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetShellWindow();
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out NativeRect rect, int size);
+}

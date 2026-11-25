@@ -22,7 +22,8 @@ jobs:
       - name: Build installer and update package
         shell: pwsh
         run: |
-          $version = '1.0.0'
+          [xml]$project = Get-Content src/PrimeWatcher/PrimeWatcher.csproj -Raw
+          $version = $project.Project.PropertyGroup.Version
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
             if ($env:GITHUB_REF_NAME -notmatch '^v\d+\.\d+\.\d+$') {
               throw "Expected a stable tag such as v1.0.0."

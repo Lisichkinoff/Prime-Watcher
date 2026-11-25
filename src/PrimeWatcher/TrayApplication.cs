@@ -19,6 +19,7 @@ internal sealed class TrayApplication : IDisposable
     private const string RepositoryUrl = "https://github.com/Lisichkinoff/Prime-Watcher";
     private readonly Application application;
     private readonly TrayPanel panel = new();
+    private readonly TaskbarIndicators taskbar;
     private readonly DeviceMonitor monitor = new();
     private readonly UpdateManager updates = new(new GithubSource(RepositoryUrl, null, false));
     private readonly DispatcherTimer updateTimer = new();
@@ -36,6 +37,7 @@ internal sealed class TrayApplication : IDisposable
     public TrayApplication(Application application)
     {
         this.application = application;
+        taskbar = new TaskbarIndicators(() => OpenPanel());
         menu.Items.Add("Открыть Prime Watcher", null, (_, _) => OpenPanel());
         menu.Items.Add("Настройки", null, (_, _) => OpenPanel(settings: true));
         menu.Items.Add("Проверить обновления", null, (_, _) => CheckUpdates(manual: true));
@@ -59,6 +61,7 @@ internal sealed class TrayApplication : IDisposable
             PinnedDevice = string.Equals(id, settings.PinnedDevice, StringComparison.OrdinalIgnoreCase) ? null : id
         });
         panel.AutoStartRequested += enabled => ChangeSettings(settings with { AutoStart = enabled });
+        panel.TaskbarIndicatorsRequested += enabled => ChangeSettings(settings with { ShowTaskbarIndicators = enabled });
         panel.GuideDismissed += () => ChangeSettings(settings with { TrayGuideSeen = true });
         panel.RestartRequested += ApplyUpdate;
         monitor.Changed += snapshot => application.Dispatcher.BeginInvoke(() =>
@@ -72,7 +75,7 @@ internal sealed class TrayApplication : IDisposable
 
     public void Start()
     {
-        panel.SetAutoStart(settings.AutoStart);
+        panel.SetOptions(settings);
         if (updates.IsInstalled)
         {
             try { AppSettings.RegisterAutoStart(settings.AutoStart); }
@@ -125,13 +128,14 @@ internal sealed class TrayApplication : IDisposable
             }
             panel.ShowUpdate("Не удалось сохранить настройки.", ReadyToRestart);
         }
-        panel.SetAutoStart(settings.AutoStart);
+        panel.SetOptions(settings);
         Render();
     }
 
     private void Render()
     {
         panel.Render(devices, settings.PinnedDevice, scanned);
+        taskbar.Render(devices, settings.PinnedDevice, settings.ShowTaskbarIndicators);
         DeviceState? focus = settings.PinnedDevice is string id
             ? devices.FirstOrDefault(device => string.Equals(device.Device.Id, id, StringComparison.OrdinalIgnoreCase))
             : devices.FirstOrDefault(device => device.Connected && device.Device.Readings.Count > 0)
