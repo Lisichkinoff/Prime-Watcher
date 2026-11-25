@@ -33,13 +33,13 @@ Run these commands on Windows with the .NET 10 SDK and PowerShell 7.
 
 ```powershell
 dotnet build src/PrimeWatcher/PrimeWatcher.csproj -c Release
-./scripts/package.ps1 -Version 1.0.4
+./scripts/package.ps1 -Version 1.0.5
 ```
 
-The installer, update package, and release index go into `artifacts/release-1.0.4/`. Pushing a version tag such as `v1.0.4` builds and publishes a stable GitHub release through GitHub Actions.
+The installer, update package, and release index go into `artifacts/release-1.0.5/`. Pushing a version tag such as `v1.0.5` builds and publishes a stable GitHub release through GitHub Actions.
 
 Run diagnostics to inspect detected devices and reported battery levels without opening the tray panel.
 
 ```powershell
-Start-Process .\artifacts\publish-1.0.4\PrimeWatcher.exe -ArgumentList '--diagnostics', 'devices.json' -Wait
+Start-Process .\artifacts\publish-1.0.5\PrimeWatcher.exe -ArgumentList '--diagnostics', 'devices.json' -Wait
 ```

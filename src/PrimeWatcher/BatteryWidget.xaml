@@ -6,6 +6,9 @@
         WindowStyle="None" ResizeMode="NoResize" ShowInTaskbar="False" ShowActivated="False" Topmost="True"
         AllowsTransparency="True" Background="Transparent" Foreground="#F2EFFA"
         FontFamily="Segoe UI" FontSize="12" UseLayoutRounding="True">
+    <Window.Resources>
+        <ResourceDictionary Source="Brand.xaml" />
+    </Window.Resources>
     <Border Background="#F31E1F29" BorderThickness="1" CornerRadius="13" Padding="9,7">
         <Border.BorderBrush>
             <SolidColorBrush x:Name="FrameColor" Color="#716383" />
@@ -16,7 +19,7 @@
                     LostMouseCapture="DragCaptureLost">
                 <Grid>
                     <StackPanel Orientation="Horizontal">
-                        <Image Source="PrimeWatcher.ico" Width="16" Height="16" Margin="0,0,6,0" />
+                        <Image Source="{StaticResource PrimeWatcherMark}" Width="16" Height="16" Margin="0,0,6,0" />
                         <TextBlock Text="Prime Watcher" FontWeight="SemiBold" VerticalAlignment="Center" />
                     </StackPanel>
                     <TextBlock Text="⠿" Foreground="#B4B1C6" HorizontalAlignment="Right" VerticalAlignment="Center"

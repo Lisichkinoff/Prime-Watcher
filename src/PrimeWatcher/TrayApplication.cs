@@ -165,7 +165,8 @@ internal sealed class TrayApplication : IDisposable
         var appearance = TrayIcon.Appearance(focus);
         if (focus is null && settings.PinnedDevice is not null && scanned)
             appearance = ("offline", null, null, true);
-        bool showAppIcon = appearance is { Percent: null, Level: null, Offline: false } && settings.PinnedDevice is null;
+        bool showAppIcon = settings.PinnedDevice is null
+            || appearance is { Percent: null, Level: null, Offline: false };
         string nextIconKey = showAppIcon ? "app" : appearance.Key;
         if (nextIconKey != iconKey)
         {
@@ -186,7 +187,8 @@ internal sealed class TrayApplication : IDisposable
     private static Icon LoadAppIcon()
     {
         using var stream = Application.GetResourceStream(new Uri("PrimeWatcher.ico", UriKind.Relative)).Stream;
-        return new Icon(stream, 16, 16);
+        var size = Forms.SystemInformation.SmallIconSize;
+        return new Icon(stream, size.Width, size.Height);
     }
 
     private bool ReadyToRestart => updates.IsInstalled && updates.UpdatePendingRestart is not null;

@@ -22,6 +22,9 @@ internal sealed class TaskbarIndicators : Window
     private const int NoSize = 0x0001;
     private const int NoMove = 0x0002;
     private const int NoActivate = 0x0010;
+    private const uint ForegroundEvent = 0x0003;
+    private const uint ReorderEvent = 0x8004;
+    private const uint SkipOwnProcess = 0x0002;
     private static readonly IntPtr TopmostWindow = new(-1);
     private static readonly IReadOnlyDictionary<DeviceKind, Geometry> Glyphs = new Dictionary<DeviceKind, Geometry>
     {
@@ -32,7 +35,13 @@ internal sealed class TaskbarIndicators : Window
     };
 
     private readonly StackPanel row = new() { Orientation = Orientation.Horizontal };
-    private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly DispatcherTimer layoutTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly DispatcherTimer orderTimer = new(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(16) };
+    private readonly WinEventCallback orderChanged;
+    private IntPtr handle;
+    private IntPtr taskbar;
+    private IntPtr reorderHook;
+    private IntPtr foregroundHook;
     private Indicator[] indicators = [];
     private Indicator[] shown = [];
     private TaskbarLayout? placed;
@@ -58,7 +67,9 @@ internal sealed class TaskbarIndicators : Window
         Title = "Prime Watcher · Заряд на панели задач";
         Content = row;
         row.MouseLeftButtonUp += (_, _) => openPanel();
-        timer.Tick += (_, _) => _ = RefreshAsync();
+        layoutTimer.Tick += (_, _) => _ = RefreshAsync();
+        orderChanged = OnWindowOrderChanged;
+        orderTimer.Tick += (_, _) => KeepAboveTaskbar();
     }
 
     public void Render(IReadOnlyList<DeviceState> devices, AppSettings settings)
@@ -78,16 +89,16 @@ internal sealed class TaskbarIndicators : Window
 
         if (!enabled || indicators.Length == 0)
         {
-            timer.Stop();
+            layoutTimer.Stop();
             ClearPlacement();
             return;
         }
 
         if (placed is not null)
             Place(placed);
-        if (!timer.IsEnabled)
+        if (!layoutTimer.IsEnabled)
         {
-            timer.Start();
+            layoutTimer.Start();
             _ = RefreshAsync();
         }
     }
@@ -128,7 +139,7 @@ internal sealed class TaskbarIndicators : Window
         if (layout is not null)
         {
             unavailableReads = 0;
-            Place(layout, restoreTopmost: true);
+            Place(layout);
         }
         else if (!unavailable || ++unavailableReads >= 3)
         {
@@ -138,12 +149,13 @@ internal sealed class TaskbarIndicators : Window
 
     private void ClearPlacement()
     {
+        StopTrackingOrder();
         Hide();
         placed = null;
         unavailableReads = 0;
     }
 
-    private void Place(TaskbarLayout layout, bool restoreTopmost = false)
+    private void Place(TaskbarLayout layout)
     {
         int perItem = (int)Math.Ceiling(itemWidth * layout.Scale);
         int capacity = Math.Max(0, (layout.Right - layout.Left) / perItem);
@@ -170,7 +182,7 @@ internal sealed class TaskbarIndicators : Window
 
         if (!IsVisible || placed != layout || widthChanged)
         {
-            var handle = new WindowInteropHelper(this).EnsureHandle();
+            new WindowInteropHelper(this).EnsureHandle();
             int width = perItem * visible.Length;
             int height = (int)Math.Ceiling(RowHeight * layout.Scale);
             int x = layout.Right - width;
@@ -182,11 +194,46 @@ internal sealed class TaskbarIndicators : Window
             }
             SetWindowPos(handle, TopmostWindow, x, y, width, height, NoActivate);
         }
-        else if (restoreTopmost)
-        {
-            SetWindowPos(new WindowInteropHelper(this).Handle, TopmostWindow, 0, 0, 0, 0, NoActivate | NoSize | NoMove);
-        }
         placed = layout;
+        TrackWindowOrder(layout.Taskbar);
+    }
+
+    private void TrackWindowOrder(IntPtr shellTaskbar)
+    {
+        if (taskbar != shellTaskbar)
+        {
+            StopTrackingOrder();
+            taskbar = shellTaskbar;
+            GetWindowThreadProcessId(taskbar, out uint explorerProcess);
+            if (explorerProcess != 0)
+                reorderHook = SetWinEventHook(ReorderEvent, ReorderEvent, IntPtr.Zero, orderChanged,
+                    explorerProcess, 0, SkipOwnProcess);
+            foregroundHook = SetWinEventHook(ForegroundEvent, ForegroundEvent, IntPtr.Zero, orderChanged,
+                0, 0, SkipOwnProcess);
+            orderTimer.Start();
+        }
+        KeepAboveTaskbar();
+    }
+
+    private void OnWindowOrderChanged(IntPtr hook, uint eventType, IntPtr window, int objectId, int childId,
+        uint eventThread, uint eventTime) => KeepAboveTaskbar();
+
+    private void KeepAboveTaskbar()
+    {
+        // Explorer raises its own topmost window on interaction. Layout queries run separately
+        // so an accessibility query cannot delay restoring the indicator's window order.
+        if (taskbar != IntPtr.Zero && IsVisible && TaskbarLayout.IsAbove(taskbar, handle))
+            SetWindowPos(handle, TopmostWindow, 0, 0, 0, 0, NoActivate | NoSize | NoMove);
+    }
+
+    private void StopTrackingOrder()
+    {
+        orderTimer.Stop();
+        if (reorderHook != IntPtr.Zero)
+            UnhookWinEvent(reorderHook);
+        if (foregroundHook != IntPtr.Zero)
+            UnhookWinEvent(foregroundHook);
+        reorderHook = foregroundHook = taskbar = IntPtr.Zero;
     }
 
     private static FrameworkElement CreateItem(Indicator indicator, Brush foreground, double width)
@@ -236,7 +283,7 @@ internal sealed class TaskbarIndicators : Window
     protected override void OnSourceInitialized(EventArgs args)
     {
         base.OnSourceInitialized(args);
-        IntPtr handle = new WindowInteropHelper(this).Handle;
+        handle = new WindowInteropHelper(this).Handle;
         int style = GetWindowLong(handle, -20);
         SetWindowLong(handle, -20, style | 0x08000000 | 0x00000080);
     }
@@ -245,11 +292,26 @@ internal sealed class TaskbarIndicators : Window
     {
         closed = true;
         enabled = false;
-        timer.Stop();
+        layoutTimer.Stop();
+        StopTrackingOrder();
         base.OnClosed(args);
     }
 
     private sealed record Indicator(DeviceKind Kind, string? Value, string Description, bool Selected, bool LastReading);
+
+    private delegate void WinEventCallback(IntPtr hook, uint eventType, IntPtr window, int objectId, int childId,
+        uint eventThread, uint eventTime);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetWinEventHook(uint eventMin, uint eventMax, IntPtr module, WinEventCallback callback,
+        uint processId, uint threadId, uint flags);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool UnhookWinEvent(IntPtr hook);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
     private static extern int GetWindowLong(IntPtr window, int index);

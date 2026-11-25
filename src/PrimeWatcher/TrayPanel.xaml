@@ -8,6 +8,10 @@
         FontFamily="Segoe UI" FontSize="14" Icon="PrimeWatcher.ico"
         UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
     <Window.Resources>
+      <ResourceDictionary>
+        <ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary Source="Brand.xaml" />
+        </ResourceDictionary.MergedDictionaries>
         <SolidColorBrush x:Key="Muted" Color="#B4B1C6" />
         <SolidColorBrush x:Key="Accent" Color="#C4B4FF" />
         <SolidColorBrush x:Key="PanelFill" Color="#292B38" />
@@ -140,6 +144,7 @@
                 </Setter.Value>
             </Setter>
         </Style>
+      </ResourceDictionary>
     </Window.Resources>
     <Border Padding="16" Background="#1E1F29" BorderBrush="#454658" BorderThickness="1" CornerRadius="20">
         <DockPanel LastChildFill="True">
@@ -149,12 +154,16 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal">
-                    <Image Source="PrimeWatcher.ico" Width="32" Height="32" Margin="0,0,9,0" />
+                    <Image Source="{StaticResource PrimeWatcherMark}" Width="32" Height="32" Margin="0,0,9,0" />
                     <TextBlock Text="Prime Watcher" FontWeight="SemiBold" FontSize="20" VerticalAlignment="Center" />
                 </StackPanel>
-                <Button Grid.Column="1" Content="×" Width="32" Height="32" Padding="0" FontSize="20"
+                <Button Grid.Column="1" Width="32" Height="32" Padding="0"
                         Background="Transparent" ToolTip="Закрыть панель"
-                        AutomationProperties.Name="Закрыть панель" Click="ClosePanel" />
+                        AutomationProperties.Name="Закрыть панель" Click="ClosePanel">
+                    <Path Data="M 1,1 L 9,9 M 9,1 L 1,9" Width="10" Height="10" Stretch="Uniform"
+                          Stroke="#F2EFFA" StrokeThickness="1.2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Button>
             </Grid>
             <Border DockPanel.Dock="Top" Background="#252632" CornerRadius="13" Padding="3" Margin="0,0,0,12">
                 <UniformGrid Columns="3">
