@@ -13,6 +13,8 @@ namespace PrimeWatcher;
 
 internal sealed class WindowsDevices(Action requestRefresh) : IDisposable
 {
+    internal const string HidInterfaces = "System.Devices.InterfaceClassGuid:=\"{4D1E55B2-F16F-11CF-88CB-001111000030}\""
+        + " AND System.Devices.InterfaceEnabled:=System.StructuredQueryType.Boolean#True";
     private const string BatteryProperty = "System.Devices.BatteryLife";
     private const string ContainerProperty = "System.Devices.ContainerId";
     private const string EndpointContainerProperty = "System.Devices.Aep.ContainerId";
@@ -22,6 +24,8 @@ internal sealed class WindowsDevices(Action requestRefresh) : IDisposable
     private const string MinorClassProperty = "System.Devices.Aep.Bluetooth.Cod.Minor";
     private const string BusNameProperty = "System.Devices.BusReportedDeviceDesc";
     private const string InstanceProperty = "System.Devices.DeviceInstanceId";
+    private static readonly string[] WirelessNames = ["wireless", "bluetooth", "2.4g", "2.4 g", "2,4 г", "usb receiver", "беспровод"];
+    private static readonly string[] HeadsetNames = ["headset", "headphone", "earbud", "наушник", "гарнитур"];
     private static readonly string[] InterfaceProperties = [ContainerProperty, BatteryProperty, BusNameProperty, InstanceProperty];
     private static readonly string[] EndpointProperties =
         [EndpointContainerProperty, ContainerProperty, AddressProperty, AppearanceProperty,
@@ -29,7 +33,7 @@ internal sealed class WindowsDevices(Action requestRefresh) : IDisposable
 
     private readonly string classic = BluetoothDevice.GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus.Connected);
     private readonly string ble = BluetoothLEDevice.GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus.Connected);
-    private readonly string audio = MediaDevice.GetAudioRenderSelector();
+    private readonly string[] audioSelectors = [MediaDevice.GetAudioRenderSelector(), MediaDevice.GetAudioCaptureSelector()];
     private readonly string[] gamepadSelectors =
     [
         HidDevice.GetDeviceSelector(1, 5),
@@ -42,7 +46,9 @@ internal sealed class WindowsDevices(Action requestRefresh) : IDisposable
     {
         Watch(classic, EndpointProperties, DeviceInformationKind.AssociationEndpoint);
         Watch(ble, EndpointProperties, DeviceInformationKind.AssociationEndpoint);
-        Watch(audio, InterfaceProperties, DeviceInformationKind.DeviceInterface);
+        foreach (string selector in audioSelectors)
+            Watch(selector, InterfaceProperties, DeviceInformationKind.DeviceInterface);
+        Watch(HidInterfaces, InterfaceProperties, DeviceInformationKind.DeviceInterface);
         foreach (string selector in gamepadSelectors)
             Watch(selector, InterfaceProperties, DeviceInformationKind.DeviceInterface);
         ReceiverBatteries.Watch(Watch);
@@ -67,16 +73,19 @@ internal sealed class WindowsDevices(Action requestRefresh) : IDisposable
 
     public async Task<IReadOnlyList<DeviceSample>> ScanAsync(CancellationToken cancellation)
     {
-        var gamepadTasks = gamepadSelectors.Select(selector =>
-            ReadInterfacesAsync(DeviceKind.Gamepad, selector, cancellation)).ToArray();
-        Task<InterfaceDevice[]> audioTask = ReadInterfacesAsync(DeviceKind.Headset, audio, cancellation);
+        var interfaceTasks = gamepadSelectors.Select(selector => ReadInterfacesAsync(DeviceKind.Gamepad, selector, cancellation))
+            .Concat(audioSelectors.Select(selector => ReadInterfacesAsync(null, selector, cancellation)))
+            .Append(ReadInterfacesAsync(DeviceKind.Other, HidInterfaces, cancellation)).ToArray();
         Task<DeviceInformation[]> classicTask = FindAsync(classic, EndpointProperties, DeviceInformationKind.AssociationEndpoint, cancellation);
         Task<DeviceInformation[]> bleTask = FindAsync(ble, EndpointProperties, DeviceInformationKind.AssociationEndpoint, cancellation);
         Task<ReceiverSnapshot> receiverTask = ReceiverBatteries.ReadAsync(cancellation);
 
-        var interfaces = (await Task.WhenAll(gamepadTasks.Append(audioTask))).SelectMany(items => items)
+        var allInterfaces = (await Task.WhenAll(interfaceTasks)).SelectMany(items => items)
             .Concat(PnpInputs.Read().Select(item => new InterfaceDevice(
                 item.Kind, item.Container, item.Instance, item.Name, item.Percent))).ToArray();
+        var knownContainers = allInterfaces.Where(item => item.Kind != DeviceKind.Other && item.Container != Guid.Empty)
+            .Select(item => item.Container).ToHashSet();
+        var interfaces = allInterfaces.Where(item => item.Kind != DeviceKind.Other || !knownContainers.Contains(item.Container)).ToArray();
         DeviceInformation[] leEndpoints = await bleTask;
         DeviceInformation[] classicEndpoints = await classicTask;
         ReceiverSnapshot receivers = await receiverTask;
@@ -86,18 +95,20 @@ internal sealed class WindowsDevices(Action requestRefresh) : IDisposable
         var activeBatteries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // A dual-mode Bluetooth peripheral can appear as both a Classic and a LE endpoint.
-        var endpoints = classicEndpoints.Select(item => (Info: item, IsLe: false))
-            .Concat(leEndpoints.Select(item => (Info: item, IsLe: true)));
-        var groups = endpoints.GroupBy(item => GroupId(item.Info), StringComparer.OrdinalIgnoreCase);
-        var bluetoothTasks = groups.Select(async Task<(DeviceSample Sample, bool IsXInput)?> (group) =>
+        var endpoints = classicEndpoints.Select(item => (Info: item, IsLe: false, Container: ContainerId(item)))
+            .Concat(leEndpoints.Select(item => (Info: item, IsLe: true, Container: ContainerId(item)))).ToArray();
+        var containerGroups = endpoints.Where(item => item.Container != Guid.Empty).GroupBy(item => item.Container)
+            .ToDictionary(group => group.Key, group => GroupId(group.First().Info));
+        var groups = endpoints.GroupBy(item => containerGroups.GetValueOrDefault(item.Container) ?? GroupId(item.Info),
+            StringComparer.OrdinalIgnoreCase);
+        var bluetoothTasks = groups.Select(async group =>
         {
             var nodes = group.ToArray();
-            Guid[] ids = nodes.Select(node => ContainerId(node.Info)).Where(id => id != Guid.Empty).Distinct().ToArray();
-            var related = interfaces.Where(item => ids.Contains(item.Container)).ToArray();
-            DeviceKind? kind = nodes.Select(node => BluetoothKind(node.Info))
-                .FirstOrDefault(value => value.HasValue) ?? related.Select(item => (DeviceKind?)item.Kind).FirstOrDefault();
-            if (kind is null)
-                return null;
+            Guid[] ids = nodes.Select(node => node.Container).Where(id => id != Guid.Empty).Distinct().ToArray();
+            var related = allInterfaces.Where(item => ids.Contains(item.Container)).ToArray();
+            DeviceKind kind = nodes.Select(node => BluetoothKind(node.Info)).FirstOrDefault(value => value.HasValue)
+                ?? related.Where(item => item.Kind != DeviceKind.Other).Select(item => (DeviceKind?)item.Kind).FirstOrDefault()
+                ?? DeviceKind.Other;
 
             foreach (InterfaceDevice item in related)
                 consumed.Add(item.Key);
@@ -120,11 +131,11 @@ internal sealed class WindowsDevices(Action requestRefresh) : IDisposable
                     readings = PercentReading([ReadPercent(await GetContainerAsync(ids[0], cancellation))]);
             }
             string name = nodes.Select(node => node.Info.Name).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
-                ?? KindName(kind.Value);
-            return (new DeviceSample(group.Key, name, kind.Value, "Bluetooth", readings, Wireless: true), xinputAlias);
+                ?? KindName(kind);
+            return (new DeviceSample(group.Key, name, kind, "Bluetooth", readings, Wireless: true), xinputAlias);
         }).ToArray();
 
-        var bluetoothResults = (await Task.WhenAll(bluetoothTasks)).OfType<ValueTuple<DeviceSample, bool>>().ToArray();
+        var bluetoothResults = await Task.WhenAll(bluetoothTasks);
         foreach (string id in batteries.Keys.Where(id => !activeBatteries.Contains(id)).ToArray())
         {
             batteries[id].Dispose();
@@ -143,7 +154,8 @@ internal sealed class WindowsDevices(Action requestRefresh) : IDisposable
         foreach (var group in interfaces.Where(item => !consumed.Contains(item.Key)
             && !receivers.Handles(item.Container, item.Instance)).GroupBy(item => item.Key))
         {
-            InterfaceDevice chosen = group.OrderByDescending(item => item.Percent.HasValue).First();
+            InterfaceDevice chosen = group.OrderByDescending(item => item.Percent.HasValue)
+                .ThenByDescending(item => item.Wireless || LooksWireless(item.Name)).First();
             var container = chosen.Container == Guid.Empty ? null : await GetContainerAsync(chosen.Container, cancellation);
             string? name = chosen.Name ?? ReadString(container, BusNameProperty) ?? container?.Name;
             if (string.IsNullOrWhiteSpace(name))
@@ -153,9 +165,13 @@ internal sealed class WindowsDevices(Action requestRefresh) : IDisposable
                 continue;
 
             var readings = PercentReading(group.Select(item => item.Percent).Append(ReadPercent(container)));
-            bool wireless = chosen.Instance.Contains("BTH", StringComparison.OrdinalIgnoreCase)
-                || readings.Count > 0 || LooksWireless(name);
-            string transport = ReceiverBatteries.IsViaKeyboardReceiver(chosen.Instance) ? "USB 2,4 ГГц" : "HID / Windows";
+            bool bluetooth = group.Any(item => item.Instance.Contains("BTH", StringComparison.OrdinalIgnoreCase));
+            bool wireless = bluetooth || readings.Count > 0 || LooksWireless(name) || LooksWireless(container?.Name)
+                || group.Any(item => item.Wireless || LooksWireless(item.Name));
+            if (chosen.Kind == DeviceKind.Other && !wireless)
+                continue;
+            string transport = bluetooth ? "Bluetooth"
+                : ReceiverBatteries.IsViaKeyboardReceiver(chosen.Instance) || IsRogDeltaII(name) ? "USB 2,4 ГГц" : "HID / Windows";
             var sample = new DeviceSample(group.Key, name, chosen.Kind, transport, readings, wireless);
             if (chosen.IsXInput && xinput.Length > 0)
                 matchedControllers.Add(sample);
@@ -170,38 +186,45 @@ internal sealed class WindowsDevices(Action requestRefresh) : IDisposable
             DeviceSample controller = matchedControllers[0];
             samples.Add(controller.Readings.Count > 0 ? controller : controller with { Readings = xinput[0].Readings });
         }
+        else if (matchedControllers.Count == 0)
+        {
+            samples.AddRange(xinput);
+        }
         else
         {
-            samples.AddRange(xinput.Length == matchedControllers.Count && matchedControllers.All(item => item.Readings.Count > 0)
-                ? matchedControllers : xinput);
+            samples.AddRange(matchedControllers);
+            for (int index = 0; index < xinput.Length - matchedControllers.Count; index++)
+                samples.Add(new DeviceSample($"xinput:unmatched:{index}", $"Геймпад XInput {index + 1}",
+                    DeviceKind.Gamepad, "XInput", []));
         }
 
         return samples;
     }
 
-    private async Task<InterfaceDevice[]> ReadInterfacesAsync(DeviceKind kind, string selector, CancellationToken cancellation)
+    private static async Task<InterfaceDevice[]> ReadInterfacesAsync(DeviceKind? kind, string selector, CancellationToken cancellation)
     {
-        string[] properties = kind == DeviceKind.Headset ? [.. InterfaceProperties, AudioFormFactor] : InterfaceProperties;
+        string[] properties = kind is null ? [.. InterfaceProperties, AudioFormFactor] : InterfaceProperties;
         var items = await FindAsync(selector, properties, DeviceInformationKind.DeviceInterface, cancellation);
-        return items.Where(item => kind != DeviceKind.Headset || Number(item, AudioFormFactor) is 3 or 5
-                || LooksLikeHeadset(item.Name))
-            .Select(info => new InterfaceDevice(kind, ContainerId(info),
+        return items.Select(info => new InterfaceDevice(kind ?? AudioKind(info), ContainerId(info),
                 ReadString(info, InstanceProperty) ?? info.Id,
-                ReadString(info, BusNameProperty) ?? info.Name, ReadPercent(info)))
+                ReadString(info, BusNameProperty) ?? info.Name, ReadPercent(info), LooksWireless(info.Name)))
             .ToArray();
     }
 
     // PKEY_AudioEndpoint_FormFactor: Headphones = 3, Headset = 5.
     private const string AudioFormFactor = "{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E} 0";
 
-    private static bool LooksLikeHeadset(string name) =>
-        new[] { "headset", "headphone", "наушник", "гарнитур" }
-            .Any(word => name.Contains(word, StringComparison.OrdinalIgnoreCase));
+    private static DeviceKind AudioKind(DeviceInformation info) =>
+        Number(info, AudioFormFactor) is 3 or 5 || LooksLikeHeadset(info.Name) ? DeviceKind.Headset : DeviceKind.Other;
 
-    private static bool LooksWireless(string name) =>
-        name.Equals("CIDOO QK75", StringComparison.OrdinalIgnoreCase)
-        || new[] { "wireless", "bluetooth", "2.4g", "2,4 г", "беспровод" }
-            .Any(word => name.Contains(word, StringComparison.OrdinalIgnoreCase));
+    private static bool LooksLikeHeadset(string name) => IsRogDeltaII(name) ||
+        HeadsetNames.Any(word => name.Contains(word, StringComparison.OrdinalIgnoreCase));
+
+    private static bool LooksWireless(string? name) => name is not null &&
+        (IsRogDeltaII(name) || name.Equals("CIDOO QK75", StringComparison.OrdinalIgnoreCase)
+            || WirelessNames.Any(word => name.Contains(word, StringComparison.OrdinalIgnoreCase)));
+
+    private static bool IsRogDeltaII(string name) => name.Contains("ROG Delta II", StringComparison.OrdinalIgnoreCase);
 
     private static async Task<DeviceInformation?> GetContainerAsync(Guid id, CancellationToken cancellation)
     {
@@ -292,7 +315,8 @@ internal sealed class WindowsDevices(Action requestRefresh) : IDisposable
         DeviceKind.Mouse => "Мышь",
         DeviceKind.Keyboard => "Клавиатура",
         DeviceKind.Gamepad => "Геймпад",
-        _ => "Наушники"
+        DeviceKind.Headset => "Наушники",
+        _ => "Беспроводное устройство"
     };
 
     public void Dispose()
@@ -306,7 +330,7 @@ internal sealed class WindowsDevices(Action requestRefresh) : IDisposable
             battery.Dispose();
     }
 
-    private sealed record InterfaceDevice(DeviceKind Kind, Guid Container, string Instance, string? Name, int? Percent)
+    private sealed record InterfaceDevice(DeviceKind Kind, Guid Container, string Instance, string? Name, int? Percent, bool Wireless = false)
     {
         public string Key => $"windows:{(Container == Guid.Empty ? Instance : Container.ToString())}:{Kind}";
         public bool IsXInput => Kind == DeviceKind.Gamepad && Instance.Contains("IG_", StringComparison.OrdinalIgnoreCase);

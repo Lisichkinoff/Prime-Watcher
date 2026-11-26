@@ -11,8 +11,9 @@ namespace PrimeWatcher;
 internal sealed record AppSettings(bool AutoStart = true, bool TrayGuideSeen = false, string? PinnedDevice = null)
 {
     public bool ShowTaskbarIndicators { get; init; } = true;
+    public bool TaskbarShowOverFullscreen { get; init; } = true;
     public bool TaskbarOnlyWithCharge { get; init; }
-    public bool TaskbarOnePerKind { get; init; } = true;
+    public bool TaskbarOnePerKind { get; init; }
     public bool TaskbarShowValues { get; init; } = true;
     public DeviceKind[] TaskbarHiddenKinds { get; init; } = [];
     public string[] TaskbarHiddenDevices { get; init; } = [];

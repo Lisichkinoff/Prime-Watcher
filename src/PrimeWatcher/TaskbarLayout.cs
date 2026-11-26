@@ -22,7 +22,7 @@ internal sealed record TaskbarLayout(IntPtr Taskbar, int Left, int Top, int Righ
         var monitor = Forms.Screen.FromHandle(taskbar).Bounds;
         double scale = Math.Max(96, GetDpiForWindow(taskbar)) / 96.0;
         int visibleHeight = Math.Min(bar.Bottom, monitor.Bottom) - Math.Max(bar.Top, monitor.Top);
-        if (visibleHeight < Math.Ceiling(30 * scale) || visibleHeight != bar.Height || IsFullscreen(monitor, taskbar))
+        if (visibleHeight < Math.Ceiling(30 * scale) || visibleHeight != bar.Height)
             return (null, false);
 
         IntPtr notificationArea = FindWindowEx(taskbar, IntPtr.Zero, "TrayNotifyWnd", null);
@@ -90,19 +90,19 @@ internal sealed record TaskbarLayout(IntPtr Taskbar, int Left, int Top, int Righ
         return foundButton ? left : null;
     }
 
-    private static bool IsFullscreen(System.Drawing.Rectangle monitor, IntPtr taskbar)
+    internal static bool IsFullscreen(IntPtr taskbar)
     {
         IntPtr window = GetForegroundWindow();
-        if (window == IntPtr.Zero || window == GetShellWindow())
+        if (window == IntPtr.Zero || window == taskbar || window == GetShellWindow())
             return false;
+        var monitor = Forms.Screen.FromHandle(taskbar).Bounds;
         var className = new StringBuilder(128);
         GetClassName(window, className, className.Capacity);
         if (className.ToString() is "WorkerW" or "Progman" or "Shell_TrayWnd")
             return false;
         return DwmGetWindowAttribute(window, 9, out var rect, Marshal.SizeOf<NativeRect>()) == 0
             && rect.Left <= monitor.Left && rect.Top <= monitor.Top
-            && rect.Right >= monitor.Right && rect.Bottom >= monitor.Bottom
-            && IsAbove(window, taskbar);
+            && rect.Right >= monitor.Right && rect.Bottom >= monitor.Bottom;
     }
 
     internal static bool IsAbove(IntPtr window, IntPtr reference)

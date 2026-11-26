@@ -244,6 +244,8 @@
                                 <CheckBox x:Name="ShowTaskbarIndicators" Content="Показывать индикаторы рядом с часами"
                                           Click="TaskbarIndicatorsChanged" />
                                 <StackPanel IsEnabled="{Binding IsChecked, ElementName=ShowTaskbarIndicators}">
+                                    <CheckBox x:Name="TaskbarShowOverFullscreen" Content="Показывать поверх полноэкранных приложений"
+                                              Click="TaskbarOptionsChanged" />
                                     <CheckBox x:Name="TaskbarShowValues" Content="Показывать значения заряда рядом со значками"
                                               Click="TaskbarOptionsChanged" />
                                     <CheckBox x:Name="TaskbarOnlyWithCharge" Content="Скрывать устройства без показаний заряда"
@@ -257,6 +259,7 @@
                                         <CheckBox x:Name="MouseOption" Tag="Mouse" Content="Мыши" Click="TaskbarKindChanged" />
                                         <CheckBox x:Name="KeyboardOption" Tag="Keyboard" Content="Клавиатуры" Click="TaskbarKindChanged" />
                                         <CheckBox x:Name="GamepadOption" Tag="Gamepad" Content="Геймпады" Click="TaskbarKindChanged" />
+                                        <CheckBox x:Name="OtherDeviceOption" Tag="Other" Content="Другие устройства" Click="TaskbarKindChanged" />
                                     </UniformGrid>
                                 </StackPanel>
                             </StackPanel>

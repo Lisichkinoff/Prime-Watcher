@@ -31,7 +31,8 @@ internal sealed class TaskbarIndicators : Window
         [DeviceKind.Headset] = Geometry.Parse("M2,10 V8 A6,6 0 0 1 14,8 V10 M2,9 H5 V15 H3 A1,1 0 0 1 2,14 Z M14,9 H11 V15 H13 A1,1 0 0 0 14,14 Z"),
         [DeviceKind.Mouse] = Geometry.Parse("M8,1 A5,5 0 0 1 13,6 V10 A5,5 0 0 1 3,10 V6 A5,5 0 0 1 8,1 Z M8,1 V6"),
         [DeviceKind.Keyboard] = Geometry.Parse("M1,4 H15 V12 H1 Z M4,7 H5 M7,7 H8 M10,7 H11 M4,9 H5 M7,9 H12"),
-        [DeviceKind.Gamepad] = Geometry.Parse("M5,4 H11 C14,4 15,8 15,11 C15,13 13,13 12,12 L10,10 H6 L4,12 C3,13 1,13 1,11 C1,8 2,4 5,4 Z M5,6 V9 M3.5,7.5 H6.5 M10,7.5 H10.2 M12.5,7.5 H12.7")
+        [DeviceKind.Gamepad] = Geometry.Parse("M5,4 H11 C14,4 15,8 15,11 C15,13 13,13 12,12 L10,10 H6 L4,12 C3,13 1,13 1,11 C1,8 2,4 5,4 Z M5,6 V9 M3.5,7.5 H6.5 M10,7.5 H10.2 M12.5,7.5 H12.7"),
+        [DeviceKind.Other] = Geometry.Parse("M2,5 H13 V11 H2 Z M13,7 H15 V9 H13 M5,8 H10")
     };
 
     private readonly StackPanel row = new() { Orientation = Orientation.Horizontal };
@@ -47,6 +48,7 @@ internal sealed class TaskbarIndicators : Window
     private TaskbarLayout? placed;
     private bool checking;
     private bool enabled;
+    private bool showOverFullscreen;
     private bool closed;
     private bool highContrast;
     private double itemWidth = ValueItemWidth;
@@ -75,6 +77,7 @@ internal sealed class TaskbarIndicators : Window
     public void Render(IReadOnlyList<DeviceState> devices, AppSettings settings)
     {
         enabled = settings.ShowTaskbarIndicators;
+        showOverFullscreen = settings.TaskbarShowOverFullscreen;
         itemWidth = settings.TaskbarShowValues ? ValueItemWidth : IconItemWidth;
         indicators = settings.GetTaskbarDevices(devices)
             .Select(device =>
@@ -157,6 +160,9 @@ internal sealed class TaskbarIndicators : Window
 
     private void Place(TaskbarLayout layout)
     {
+        if (HideForFullscreen(layout.Taskbar))
+            return;
+
         int perItem = (int)Math.Ceiling(itemWidth * layout.Scale);
         int capacity = Math.Max(0, (layout.Right - layout.Left) / perItem);
         Indicator[] visible = indicators.OrderByDescending(item => item.Selected).ThenBy(item => item.Kind)
@@ -216,7 +222,20 @@ internal sealed class TaskbarIndicators : Window
     }
 
     private void OnWindowOrderChanged(IntPtr hook, uint eventType, IntPtr window, int objectId, int childId,
-        uint eventThread, uint eventTime) => KeepAboveTaskbar();
+        uint eventThread, uint eventTime)
+    {
+        if (eventType == ForegroundEvent && HideForFullscreen(taskbar))
+            return;
+        KeepAboveTaskbar();
+    }
+
+    private bool HideForFullscreen(IntPtr shellTaskbar)
+    {
+        if (showOverFullscreen || shellTaskbar == IntPtr.Zero || !TaskbarLayout.IsFullscreen(shellTaskbar))
+            return false;
+        ClearPlacement();
+        return true;
+    }
 
     private void KeepAboveTaskbar()
     {

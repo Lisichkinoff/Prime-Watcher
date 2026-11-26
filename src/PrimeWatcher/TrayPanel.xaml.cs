@@ -83,6 +83,7 @@ internal partial class TrayPanel : Window
         settingOptions = true;
         AutoStart.IsChecked = settings.AutoStart;
         ShowTaskbarIndicators.IsChecked = settings.ShowTaskbarIndicators;
+        TaskbarShowOverFullscreen.IsChecked = settings.TaskbarShowOverFullscreen;
         TaskbarShowValues.IsChecked = settings.TaskbarShowValues;
         TaskbarOnlyWithCharge.IsChecked = settings.TaskbarOnlyWithCharge;
         TaskbarOnePerKind.IsChecked = settings.TaskbarOnePerKind;
@@ -90,6 +91,7 @@ internal partial class TrayPanel : Window
         MouseOption.IsChecked = settings.IsTaskbarKindEnabled(DeviceKind.Mouse);
         KeyboardOption.IsChecked = settings.IsTaskbarKindEnabled(DeviceKind.Keyboard);
         GamepadOption.IsChecked = settings.IsTaskbarKindEnabled(DeviceKind.Gamepad);
+        OtherDeviceOption.IsChecked = settings.IsTaskbarKindEnabled(DeviceKind.Other);
         WidgetEnabled.IsChecked = settings.ShowWidget;
         WidgetOnlyWhenLow.IsChecked = settings.WidgetOnlyWhenLow;
         WidgetClickThrough.IsChecked = settings.WidgetClickThrough;
@@ -205,6 +207,7 @@ internal partial class TrayPanel : Window
         SettingsChanged?.Invoke(settings => settings with { ShowTaskbarIndicators = ShowTaskbarIndicators.IsChecked == true });
     private void TaskbarOptionsChanged(object sender, RoutedEventArgs args) => SettingsChanged?.Invoke(settings => settings with
     {
+        TaskbarShowOverFullscreen = TaskbarShowOverFullscreen.IsChecked == true,
         TaskbarShowValues = TaskbarShowValues.IsChecked == true,
         TaskbarOnlyWithCharge = TaskbarOnlyWithCharge.IsChecked == true,
         TaskbarOnePerKind = TaskbarOnePerKind.IsChecked == true

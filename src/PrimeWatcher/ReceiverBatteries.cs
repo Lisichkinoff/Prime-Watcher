@@ -24,6 +24,7 @@ internal static class ReceiverBatteries
     private static readonly Receiver[] Receivers =
     [
         new(0x01C0, 1, 0x03F0, [0x02CC, 0x06BE], ReadHyperXAsync),
+        new(0xFF00, null, 0x0B05, [0x1AFA], ReadAsusDeltaIIAsync),
         new(0xFF02, 2, 0x3554, [0xF503], ReadVgnAsync),
         new(0xFF60, 0x61, 0x36B0, [0x3002], ReadViaKeyboardAsync),
         new(0xFF00, 1, 0x046D, [0xC52B, 0xC532, 0xC534, 0xC548], ReadLogitechAsync),
@@ -34,8 +35,7 @@ internal static class ReceiverBatteries
     {
         foreach (Receiver receiver in Receivers)
         foreach (ushort product in receiver.Products)
-            add(HidDevice.GetDeviceSelector(receiver.Page, receiver.Usage, receiver.Vendor, product),
-                Properties, DeviceInformationKind.DeviceInterface);
+            add(receiver.Selector(product), Properties, DeviceInformationKind.DeviceInterface);
     }
 
     public static async Task<ReceiverSnapshot> ReadAsync(CancellationToken cancellation)
@@ -68,8 +68,8 @@ internal static class ReceiverBatteries
 
     private static async Task<Endpoint[]> DiscoverAsync(Receiver receiver, ushort product, CancellationToken cancellation)
     {
-        string selector = HidDevice.GetDeviceSelector(receiver.Page, receiver.Usage, receiver.Vendor, product);
-        var items = await WindowsDevices.FindAsync(selector, Properties, DeviceInformationKind.DeviceInterface, cancellation);
+        var items = await WindowsDevices.FindAsync(receiver.Selector(product), Properties,
+            DeviceInformationKind.DeviceInterface, cancellation);
         return items.Select(item => new Endpoint(receiver, item, WindowsDevices.ContainerId(item))).ToArray();
     }
 
@@ -86,6 +86,20 @@ internal static class ReceiverBatteries
         return response[6] <= 100
             ? [new($"windows:{id}:Headset", "HyperX Cloud III S Wireless", DeviceKind.Headset, "USB 2,4 ГГц", [new("", response[6])], Wireless: true)]
             : [];
+    }
+
+    private static async Task<DeviceSample[]?> ReadAsusDeltaIIAsync(string path, string id, CancellationToken cancellation)
+    {
+        using var channel = HidChannel.Open(path, 64);
+        if (channel is null)
+            return null;
+        // The ROG Delta II receiver echoes the power query and returns the percentage in byte 6.
+        byte[]? response = await channel.ExchangeAsync([0xCC, 0x12, 0x07],
+            (report, length) => length >= 7 && report[0] == 0xCC && report[1] == 0x12 && report[2] == 0x07,
+            TimeSpan.FromMilliseconds(750), cancellation);
+        return response is not null && response[6] <= 100
+            ? [new($"windows:{id}:Headset", "ASUS ROG Delta II", DeviceKind.Headset, "USB 2,4 ГГц", [new("", response[6])], Wireless: true)]
+            : null;
     }
 
     private static async Task<DeviceSample[]?> ReadVgnAsync(string path, string id, CancellationToken cancellation)
@@ -217,8 +231,18 @@ internal static class ReceiverBatteries
     public static bool IsViaKeyboardReceiver(string instance) =>
         instance.Contains("VID_36B0&PID_3002", StringComparison.OrdinalIgnoreCase);
 
-    private sealed record Receiver(ushort Page, ushort Usage, ushort Vendor, ushort[] Products,
-        Func<string, string, CancellationToken, Task<DeviceSample[]?>> Read);
+    private sealed record Receiver(ushort Page, ushort? Usage, ushort Vendor, ushort[] Products,
+        Func<string, string, CancellationToken, Task<DeviceSample[]?>> Read)
+    {
+        public string Selector(ushort product)
+        {
+            if (Usage is ushort usage)
+                return HidDevice.GetDeviceSelector(Page, usage, Vendor, product);
+
+            return WindowsDevices.HidInterfaces
+                + FormattableString.Invariant($" AND System.DeviceInterface.Hid.UsagePage:={Page} AND System.DeviceInterface.Hid.VendorId:={Vendor} AND System.DeviceInterface.Hid.ProductId:={product}");
+        }
+    }
     private sealed record Endpoint(Receiver Receiver, DeviceInformation Info, Guid Container);
     private sealed record ProbeResult(Guid Container, DeviceSample[] Samples);
 }

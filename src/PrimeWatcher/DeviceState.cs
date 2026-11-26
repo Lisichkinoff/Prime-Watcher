@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace PrimeWatcher;
 
-internal enum DeviceKind { Headset, Mouse, Keyboard, Gamepad }
+internal enum DeviceKind { Headset, Mouse, Keyboard, Gamepad, Other }
 internal enum BatteryLevel { Empty, Low, Medium, Full }
 
 internal sealed record BatteryReading(string Label, int? Percent = null, BatteryLevel? Level = null,
